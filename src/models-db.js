@@ -119,16 +119,16 @@ export const PROVIDERS = {
     ]
   },
   glm: {
-    name: 'GLM (ZhipuAI)',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    name: 'GLM (Z.AI)',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
     apiKeyEnv: 'GLM_API_KEY',
     apiKeyFile: '.glm_api_key',
-    description: 'Chinese GLM models',
+    description: 'Chinese GLM models - OpenAI compatible',
     models: [
-      { id: 'glm-4-plus', name: 'GLM-4 Plus', description: 'Most capable', recommended: true },
-      { id: 'glm-4', name: 'GLM-4', description: 'Standard model' },
+      { id: 'glm-4.7', name: 'GLM-4.7', description: 'Latest & best for coding', recommended: true },
+      { id: 'glm-4-plus', name: 'GLM-4 Plus', description: 'Most capable' },
       { id: 'glm-4-flash', name: 'GLM-4 Flash', description: 'Fast responses' },
-      { id: 'glm-4-long', name: 'GLM-4 Long', description: '1M context' },
+      { id: 'glm-4-air', name: 'GLM-4 Air', description: 'Lightweight & fast' },
     ]
   },
   mistral: {
