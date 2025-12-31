@@ -2,17 +2,21 @@
   "name": "my-ai-cli",
   "version": "1.0.0",
   "description": "Custom AI CLI Agent - Like Claude Code but with your own model",
-  "main": "src/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
-    "zesbe": "./src/index.js",
-    "my-ai": "./src/index.js",
-    "ai": "./src/index.js"
+    "zesbe": "./dist/index.js",
+    "my-ai": "./dist/index.js",
+    "ai": "./dist/index.js"
   },
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "link": "npm link"
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "prepare": "npm run build",
+    "link": "npm run build && npm link",
+    "clean": "rm -rf dist"
   },
   "keywords": [
     "ai",
@@ -45,5 +49,11 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.2.7",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
