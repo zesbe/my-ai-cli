@@ -18,18 +18,35 @@ export class Agent {
   constructor(options = {}) {
     this.provider = options.provider || 'openai';
     this.model = options.model || 'gpt-4o';
-    this.apiKey = options.apiKey;
-    this.baseUrl = options.baseUrl;
+    this._apiKey = options.apiKey;
+    this._baseUrl = options.baseUrl;
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.yolo = options.yolo || false;
     this.stream = options.stream !== false;
     this.history = [];
 
     // Initialize OpenAI client (works with any OpenAI-compatible API)
+    this._initClient();
+  }
+
+  _initClient() {
     this.client = new OpenAI({
-      apiKey: this.apiKey,
-      baseURL: this.baseUrl
+      apiKey: this._apiKey,
+      baseURL: this._baseUrl
     });
+  }
+
+  // Getters and setters to reinitialize client when config changes
+  get apiKey() { return this._apiKey; }
+  set apiKey(value) {
+    this._apiKey = value;
+    this._initClient();
+  }
+
+  get baseUrl() { return this._baseUrl; }
+  set baseUrl(value) {
+    this._baseUrl = value;
+    this._initClient();
   }
 
   clearHistory() {

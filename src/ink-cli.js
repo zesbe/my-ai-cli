@@ -483,6 +483,15 @@ Tokens: ${totalTokens}`);
     if (p) {
       agent.provider = id;
       agent.baseUrl = p.baseUrl;
+      
+      // Load API key for new provider
+      const keyFile = path.join(os.homedir(), p.apiKeyFile || `.${id}_api_key`);
+      if (fs.existsSync(keyFile)) {
+        try {
+          agent.apiKey = fs.readFileSync(keyFile, 'utf-8').trim();
+        } catch (e) {}
+      }
+      
       const firstModel = p.models?.[0];
       agent.model = typeof firstModel === 'object' ? firstModel.id : firstModel;
       addMessage('success', `Provider: ${p.name}, Model: ${agent.model}`);
