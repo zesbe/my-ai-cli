@@ -103,7 +103,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { value: '/providers', label: '/providers', description: '📋 List all providers with pricing' },
   { value: '/model', label: '/model', description: 'Switch AI model' },
   { value: '/provider', label: '/provider', description: 'Switch AI provider' },
-  { value: '/apikey', label: '/apikey', description: '🔐 Set API key' },
+  { value: '/apikey', label: '/apikey', description: '🔐 Set API key (popup)' },
+  { value: '/auth', label: '/auth', description: '🔑 Authentication setup (like Gemini CLI)' },
   { value: '/free', label: '/free', description: '🆓 Show FREE providers' },
   { value: '/clear', label: '/clear', description: 'Clear conversation' },
   { value: '/save', label: '/save', description: '💾 Save session' },
@@ -666,6 +667,284 @@ const SkillsMenu: React.FC<SkillsMenuProps> = ({ skills, loadedSkills, onSelect,
   );
 };
 
+// ============================================================================
+// TEXT INPUT DIALOG (Popup Modal like OpenCode/Gemini CLI)
+// ============================================================================
+interface TextInputDialogProps {
+  title: string;
+  placeholder?: string;
+  description?: string;
+  maskInput?: boolean;  // For password/API key masking
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}
+
+const TextInputDialog: React.FC<TextInputDialogProps> = ({
+  title,
+  placeholder = '',
+  description,
+  maskInput = false,
+  onSubmit,
+  onCancel
+}) => {
+  const [value, setValue] = useState('');
+  const [showValue, setShowValue] = useState(!maskInput);
+
+  useInput((input: string, key: InkKey) => {
+    if (key.escape) {
+      onCancel();
+    }
+    // Ctrl+H to toggle show/hide for masked input
+    if (key.ctrl && input === 'h' && maskInput) {
+      setShowValue(!showValue);
+    }
+  });
+
+  const handleSubmit = (val: string): void => {
+    if (val.trim()) {
+      onSubmit(val.trim());
+    }
+  };
+
+  const displayValue = maskInput && !showValue ? '•'.repeat(value.length) : value;
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'double',
+    borderColor: 'cyan',
+    paddingX: 2,
+    paddingY: 1,
+    width: 60
+  },
+    // Title
+    h(Box, { justifyContent: 'center', marginBottom: 1 },
+      h(Text, { color: 'cyan', bold: true }, `🔐 ${title}`)
+    ),
+    // Description
+    description && h(Box, { marginBottom: 1 },
+      h(Text, { color: 'gray' }, description)
+    ),
+    // Input field
+    h(Box, {
+      borderStyle: 'single',
+      borderColor: 'gray',
+      paddingX: 1
+    },
+      h(TextInput, {
+        value: value,
+        onChange: setValue,
+        onSubmit: handleSubmit,
+        placeholder: placeholder,
+        mask: maskInput && !showValue ? '•' : undefined
+      })
+    ),
+    // Help text
+    h(Box, { marginTop: 1, flexDirection: 'column' },
+      h(Text, { color: 'gray', dimColor: true }, 'Enter: Submit  |  Esc: Cancel'),
+      maskInput && h(Text, { color: 'gray', dimColor: true }, `Ctrl+H: ${showValue ? 'Hide' : 'Show'} input`)
+    )
+  );
+};
+
+// ============================================================================
+// AUTH DIALOG (Provider Selection + API Key Input)
+// ============================================================================
+interface AuthDialogProps {
+  currentProvider: string;
+  providers: any[];
+  onSelectProvider: (providerId: string) => void;
+  onSubmitApiKey: (providerId: string, apiKey: string) => void;
+  onCancel: () => void;
+}
+
+const AuthDialog: React.FC<AuthDialogProps> = ({
+  currentProvider,
+  providers,
+  onSelectProvider,
+  onSubmitApiKey,
+  onCancel
+}) => {
+  const [step, setStep] = useState<'provider' | 'apikey'>('provider');
+  const [selectedProvider, setSelectedProvider] = useState(currentProvider);
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+
+  useInput((input: string, key: InkKey) => {
+    if (key.escape) {
+      if (step === 'apikey') {
+        setStep('provider');
+      } else {
+        onCancel();
+      }
+    }
+    if (key.ctrl && input === 'h') {
+      setShowKey(!showKey);
+    }
+  });
+
+  const handleProviderSelect = (item: any): void => {
+    setSelectedProvider(item.value);
+    onSelectProvider(item.value);
+    setStep('apikey');
+  };
+
+  const handleApiKeySubmit = (key: string): void => {
+    if (key.trim()) {
+      onSubmitApiKey(selectedProvider, key.trim());
+    }
+  };
+
+  const providerInfo = PROVIDER_INFO[selectedProvider];
+
+  if (step === 'provider') {
+    return h(Box, {
+      flexDirection: 'column',
+      borderStyle: 'double',
+      borderColor: 'magenta',
+      paddingX: 2,
+      paddingY: 1,
+      width: 60
+    },
+      h(Box, { justifyContent: 'center', marginBottom: 1 },
+        h(Text, { color: 'magenta', bold: true }, '🔑 Authentication Setup')
+      ),
+      h(Box, { marginBottom: 1 },
+        h(Text, { color: 'gray' }, 'Select a provider to configure:')
+      ),
+      h(SelectInput, {
+        items: providers.map(p => ({
+          label: `${p.name}${p.id === currentProvider ? ' ✓' : ''}`,
+          value: p.id,
+          free: p.free
+        })),
+        onSelect: handleProviderSelect,
+        itemComponent: ({ isSelected, label, free }: any) =>
+          h(Box, null,
+            h(Text, {
+              color: isSelected ? 'magenta' : 'white',
+              bold: isSelected
+            }, `${isSelected ? '▸ ' : '  '}${label}`),
+            free && h(Text, { color: 'green' }, ' 🆓')
+          )
+      } as any),
+      h(Box, { marginTop: 1 },
+        h(Text, { color: 'gray', dimColor: true }, 'Esc: Cancel')
+      )
+    );
+  }
+
+  // Step 2: API Key input
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'double',
+    borderColor: 'cyan',
+    paddingX: 2,
+    paddingY: 1,
+    width: 65
+  },
+    h(Box, { justifyContent: 'center', marginBottom: 1 },
+      h(Text, { color: 'cyan', bold: true }, `🔐 API Key for ${providerInfo?.name || selectedProvider}`)
+    ),
+    // Provider info
+    providerInfo && h(Box, { flexDirection: 'column', marginBottom: 1 },
+      h(Text, { color: 'gray' }, `Get your key: `),
+      h(Text, { color: 'blue', underline: true }, providerInfo.apiKeyUrl)
+    ),
+    // Input field
+    h(Box, { marginBottom: 1 },
+      h(Text, { color: 'white' }, 'API Key: ')
+    ),
+    h(Box, {
+      borderStyle: 'single',
+      borderColor: 'gray',
+      paddingX: 1
+    },
+      h(TextInput, {
+        value: apiKey,
+        onChange: setApiKey,
+        onSubmit: handleApiKeySubmit,
+        placeholder: 'Paste your API key here...',
+        mask: showKey ? undefined : '•'
+      })
+    ),
+    // Help text
+    h(Box, { marginTop: 1, flexDirection: 'column' },
+      h(Text, { color: 'gray', dimColor: true }, 'Enter: Save  |  Esc: Back  |  Ctrl+H: Toggle visibility'),
+      providerInfo?.freeCredits && h(Text, { color: 'green' }, `🆓 ${providerInfo.freeCredits}`)
+    )
+  );
+};
+
+// ============================================================================
+// CONFIRMATION DIALOG (Yes/No popup like Gemini CLI)
+// ============================================================================
+interface ConfirmDialogProps {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
+  title,
+  message,
+  confirmLabel = 'Yes',
+  cancelLabel = 'No',
+  onConfirm,
+  onCancel
+}) => {
+  const [selected, setSelected] = useState(0);
+
+  useInput((input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+    if (key.return) {
+      selected === 0 ? onConfirm() : onCancel();
+    }
+    if (key.leftArrow || key.rightArrow) {
+      setSelected(s => s === 0 ? 1 : 0);
+    }
+    if (input === 'y' || input === 'Y') onConfirm();
+    if (input === 'n' || input === 'N') onCancel();
+  });
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'double',
+    borderColor: 'yellow',
+    paddingX: 2,
+    paddingY: 1,
+    width: 50
+  },
+    h(Box, { justifyContent: 'center', marginBottom: 1 },
+      h(Text, { color: 'yellow', bold: true }, `⚠️ ${title}`)
+    ),
+    h(Box, { marginBottom: 1 },
+      h(Text, { color: 'white' }, message)
+    ),
+    h(Box, { justifyContent: 'center', gap: 2 },
+      h(Box, {
+        borderStyle: selected === 0 ? 'single' : undefined,
+        borderColor: 'green',
+        paddingX: 2
+      },
+        h(Text, { color: selected === 0 ? 'green' : 'gray', bold: selected === 0 }, confirmLabel)
+      ),
+      h(Box, {
+        borderStyle: selected === 1 ? 'single' : undefined,
+        borderColor: 'red',
+        paddingX: 2
+      },
+        h(Text, { color: selected === 1 ? 'red' : 'gray', bold: selected === 1 }, cancelLabel)
+      )
+    ),
+    h(Box, { marginTop: 1, justifyContent: 'center' },
+      h(Text, { color: 'gray', dimColor: true }, 'Y/N or ←→ + Enter')
+    )
+  );
+};
+
 // Main App
 interface ChatAppProps {
   agent: AgentType;
@@ -688,6 +967,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showMCPBrowseMenu, setShowMCPBrowseMenu] = useState(false);
   const [showMCPMarketplaceMenu, setShowMCPMarketplaceMenu] = useState(false);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
+  const [apiKeyDialogProvider, setApiKeyDialogProvider] = useState('');
   const [availableSkills, setAvailableSkills] = useState<any[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<any[]>([]);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
@@ -744,6 +1026,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       setShowMCPBrowseMenu(false);
       setShowMCPMarketplaceMenu(false);
       setShowSkillsMenu(false);
+      setShowAuthDialog(false);
+      setShowApiKeyDialog(false);
       completionCycler.current.reset();
     }
 
@@ -825,8 +1109,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   }, []);
 
   useEffect(() => {
-    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu);
-  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu]);
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showAuthDialog && !showApiKeyDialog);
+  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showAuthDialog, showApiKeyDialog]);
 
   const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
     setMessages(prev => [...prev, {
@@ -1133,21 +1417,29 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
         break;
 
       case '/apikey':
-        const info = PROVIDER_INFO[agent.provider];
-        if (args && info) {
+        if (args) {
+          // Direct API key set via command line
+          const info = PROVIDER_INFO[agent.provider];
           const keyFile = path.join(os.homedir(), `.${agent.provider}_api_key`);
           try {
             fs.writeFileSync(keyFile, args.trim());
             fs.chmodSync(keyFile, 0o600);
             agent.apiKey = args.trim();
-            addMessage('success', `API key saved for ${info.name}`);
+            addMessage('success', `API key saved for ${info?.name || agent.provider}`);
           } catch (e) {
             const error = e as Error;
             addMessage('error', error.message);
           }
-        } else if (info) {
-          addMessage('system', `🔐 Set API key:\n/apikey YOUR_KEY\n\nGet key: ${info.apiKeyUrl}`);
+        } else {
+          // Show popup dialog for API key input
+          setApiKeyDialogProvider(agent.provider);
+          setShowApiKeyDialog(true);
         }
+        break;
+
+      case '/auth':
+        // Show full authentication dialog (provider selection + API key)
+        setShowAuthDialog(true);
         break;
 
       case '/yolo':
@@ -1670,6 +1962,57 @@ Config file: ~/.zesbe/mcp.json`);
     }
   };
 
+  // Handler for API Key dialog submission
+  const handleApiKeySubmit = (apiKey: string): void => {
+    setShowApiKeyDialog(false);
+    const providerId = apiKeyDialogProvider || agent.provider;
+    const info = PROVIDER_INFO[providerId];
+    const keyFile = path.join(os.homedir(), `.${providerId}_api_key`);
+    try {
+      fs.writeFileSync(keyFile, apiKey);
+      fs.chmodSync(keyFile, 0o600);
+      if (providerId === agent.provider) {
+        agent.apiKey = apiKey;
+      }
+      addMessage('success', `✅ API key saved for ${info?.name || providerId}`);
+    } catch (e) {
+      const error = e as Error;
+      addMessage('error', `Failed to save API key: ${error.message}`);
+    }
+  };
+
+  // Handler for Auth dialog - provider selection
+  const handleAuthProviderSelect = (providerId: string): void => {
+    // Just track selected provider, dialog handles the flow
+  };
+
+  // Handler for Auth dialog - API key submission
+  const handleAuthApiKeySubmit = (providerId: string, apiKey: string): void => {
+    setShowAuthDialog(false);
+    const info = PROVIDER_INFO[providerId];
+    const keyFile = path.join(os.homedir(), `.${providerId}_api_key`);
+    try {
+      fs.writeFileSync(keyFile, apiKey);
+      fs.chmodSync(keyFile, 0o600);
+
+      // Also switch to this provider
+      const providerConfig = PROVIDERS[providerId];
+      if (providerConfig) {
+        agent.provider = providerId;
+        agent.baseUrl = providerConfig.baseUrl;
+        agent.apiKey = apiKey;
+        const firstModel = providerConfig.models?.[0];
+        agent.model = typeof firstModel === 'object' ? firstModel.id : firstModel;
+        addMessage('success', `✅ Authentication configured!\nProvider: ${info?.name || providerId}\nModel: ${agent.model}`);
+      } else {
+        addMessage('success', `✅ API key saved for ${info?.name || providerId}`);
+      }
+    } catch (e) {
+      const error = e as Error;
+      addMessage('error', `Failed to save API key: ${error.message}`);
+    }
+  };
+
   // Render
   return h(Box, { flexDirection: 'column', padding: 1 },
     // Header
@@ -1743,6 +2086,27 @@ Config file: ~/.zesbe/mcp.json`);
       loadedSkills: loadedSkills,
       onSelect: handleSkillsSelect,
       onCancel: () => setShowSkillsMenu(false)
+    }),
+
+    // API Key Dialog (popup modal)
+    showApiKeyDialog && h(TextInputDialog, {
+      title: `API Key for ${PROVIDER_INFO[apiKeyDialogProvider]?.name || apiKeyDialogProvider}`,
+      placeholder: 'Paste your API key here...',
+      description: PROVIDER_INFO[apiKeyDialogProvider]?.apiKeyUrl
+        ? `Get your key: ${PROVIDER_INFO[apiKeyDialogProvider].apiKeyUrl}`
+        : undefined,
+      maskInput: true,
+      onSubmit: handleApiKeySubmit,
+      onCancel: () => setShowApiKeyDialog(false)
+    }),
+
+    // Auth Dialog (provider selection + API key)
+    showAuthDialog && h(AuthDialog, {
+      currentProvider: agent.provider,
+      providers: getProviderList(),
+      onSelectProvider: handleAuthProviderSelect,
+      onSubmitApiKey: handleAuthApiKeySubmit,
+      onCancel: () => setShowAuthDialog(false)
     }),
 
     // Input
