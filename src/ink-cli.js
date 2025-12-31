@@ -9,6 +9,30 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+// Session helper
+const SESSION_DIR = path.join(os.homedir(), '.zesbe', 'sessions');
+
+function listSavedSessions() {
+  if (!fs.existsSync(SESSION_DIR)) return [];
+  try {
+    return fs.readdirSync(SESSION_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const filePath = path.join(SESSION_DIR, f);
+        const stat = fs.statSync(filePath);
+        let summary = '';
+        try {
+          const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          summary = data.summary || '';
+        } catch (e) {}
+        return { name: f.replace('.json', ''), modified: stat.mtime, summary };
+      })
+      .sort((a, b) => b.modified - a.modified);
+  } catch (e) {
+    return [];
+  }
+}
+
 const { createElement: h } = React;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -554,8 +578,7 @@ Create one of these files in your project root:
         break;
 
       case '/sessions':
-        const { Agent } = await import('./agent.js');
-        const sessions = Agent.listSessions();
+        const sessions = listSavedSessions();
         if (sessions.length === 0) {
           addMessage('system', 'No saved sessions found.\nUse /save to save current session.');
         } else {
