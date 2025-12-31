@@ -48,6 +48,13 @@ program
       process.exit(1);
     }
 
+    // Auto-select model if provider changed but model wasn't specified
+    let selectedModel = options.model;
+    if (options.provider !== config.provider && options.model === config.model) {
+      // Provider changed, use first model from new provider
+      selectedModel = providerConfig.models?.[0] || options.model;
+    }
+
     // Get API key (auto-load from config/file)
     let apiKey = options.apiKey || getApiKey(options.provider, config);
     let baseUrl = options.baseUrl || providerConfig.baseUrl;
@@ -82,7 +89,7 @@ program
     if (!options.quiet) {
       console.clear();
       showWelcome({
-        model: options.model,
+        model: selectedModel,
         provider: options.provider,
         yolo: options.yolo
       });
@@ -91,7 +98,7 @@ program
     // Create agent
     const agent = new Agent({
       provider: options.provider,
-      model: options.model,
+      model: selectedModel,
       apiKey,
       baseUrl,
       systemPrompt: options.system,
