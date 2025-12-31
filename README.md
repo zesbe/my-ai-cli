@@ -4,12 +4,20 @@ Custom AI CLI Agent - Like Claude Code but with **your own model**.
 
 ## Features
 
-- **Multi-provider support**: OpenAI, Anthropic, Ollama, or any OpenAI-compatible API
-- **Built-in tools**: bash, read, write, edit, glob, grep
+- **Multi-provider support**: OpenAI, Anthropic, Gemini, Ollama, MiniMax, GLM, or any OpenAI-compatible API
+- **Built-in tools**: bash, read, write, edit, glob, grep, web_fetch
+- **MCP Marketplace** 🆕: Browse, search, and install Model Context Protocol servers
+  - 12 curated popular servers (filesystem, github, playwright, brave-search, etc.)
+  - One-command installation with `/mcp install <id>`
+  - Access to 13,000+ servers via integrated marketplaces
+- **Skills System** 🆕: Extend AI with reusable skills
+  - Load/unload skills dynamically with `/skills load <id>`
+  - Create custom skills for coding standards, workflows, patterns
+  - Project and global skill directories
+- **Session Management**: Save/load/resume conversations
 - **Streaming responses**: Real-time output
 - **YOLO mode**: Auto-approve all actions (bypass permissions)
-- **Conversation history**: Context preserved during session
-- **Interactive CLI**: Full-featured terminal interface
+- **Interactive CLI**: Full-featured terminal interface with Ink
 
 ## Installation
 
@@ -65,11 +73,30 @@ Options:
 ### Interactive Commands
 
 ```
+🔌 MCP (Model Context Protocol)
+/mcp browse           - Browse popular MCP servers
+/mcp search <query>   - Search MCP servers
+/mcp install <id>     - Install an MCP server
+/mcp marketplace      - View online marketplaces
+/mcp connect          - Connect to configured servers
+/mcp list             - List connected servers
+
+📚 Skills
+/skills               - List available skills
+/skills load <id>     - Load a skill
+/skills unload <id>   - Unload a skill
+/skills create <name> - Create new skill template
+/skills loaded        - Show loaded skills
+
+💬 Chat
 /help, /h      - Show help
 /clear, /c     - Clear conversation history
-/tools         - List available tools
-/model         - Show current model
-/model <name>  - Change model
+/model         - Switch model
+/provider      - Switch provider
+/save [name]   - Save session
+/load [name]   - Load session
+/resume        - Resume last session
+/yolo          - Toggle auto-approve
 /exit, /q      - Exit
 ```
 
