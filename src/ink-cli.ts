@@ -132,6 +132,34 @@ const SLASH_COMMANDS: SlashCommand[] = [
 const TYPING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const BRAIN_FRAMES = ['🧠', '💭', '💡', '✨'];
 const ASSESS_FRAMES = ['◐', '◓', '◑', '◒'];
+const TOOL_SPINNER_FRAMES = ['●', '○'];
+
+// Tool call data
+interface ToolCallData {
+  id: string;
+  name: string;
+  args: string;
+  status: 'running' | 'completed' | 'error';
+  startTime: number;
+  result?: string;
+}
+
+// Tool name to icon mapping
+const TOOL_ICONS: Record<string, string> = {
+  bash: '⚡',
+  read: '📖',
+  write: '📝',
+  edit: '✏️',
+  glob: '🔍',
+  grep: '🔎',
+  web_fetch: '🌐',
+  git_status: '📊',
+  git_diff: '📋',
+  git_log: '📜',
+  git_commit: '💾',
+  git_branch: '🌿',
+  default: '🔧'
+};
 
 // Components
 interface AssessingIndicatorProps {
@@ -223,6 +251,72 @@ const StreamingStatus: React.FC<StreamingStatusProps> = ({ isLoading, isTyping, 
   }
 
   return null;
+};
+
+// Claude-style Tool Call Indicator
+interface ToolCallIndicatorProps {
+  toolCall: ToolCallData;
+}
+
+const ToolCallIndicator: React.FC<ToolCallIndicatorProps> = ({ toolCall }) => {
+  const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const icon = TOOL_ICONS[toolCall.name] || TOOL_ICONS.default;
+
+  useEffect(() => {
+    if (toolCall.status !== 'running') return;
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % TOOL_SPINNER_FRAMES.length);
+      setElapsed(Math.floor((Date.now() - toolCall.startTime) / 1000));
+    }, 300);
+    return () => clearInterval(timer);
+  }, [toolCall.status, toolCall.startTime]);
+
+  // Truncate args for display
+  const displayArgs = toolCall.args.length > 50 ? toolCall.args.slice(0, 47) + '...' : toolCall.args;
+
+  if (toolCall.status === 'running') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'yellow' }, TOOL_SPINNER_FRAMES[frame]),
+      h(Text, { color: 'cyan', bold: true }, ` ${toolCall.name}`),
+      h(Text, { color: 'gray' }, `(${displayArgs})`),
+      elapsed > 0 && h(Text, { color: 'gray', dimColor: true }, ` ${elapsed}s`)
+    );
+  }
+
+  if (toolCall.status === 'completed') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'green' }, '✓'),
+      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
+      h(Text, { color: 'gray' }, `(${displayArgs})`),
+      toolCall.result && h(Text, { color: 'gray', dimColor: true }, ` → ${toolCall.result.slice(0, 30)}${toolCall.result.length > 30 ? '...' : ''}`)
+    );
+  }
+
+  if (toolCall.status === 'error') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'red' }, '✗'),
+      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
+      h(Text, { color: 'red' }, ` Error`)
+    );
+  }
+
+  return null;
+};
+
+// Tool Calls List Component
+interface ToolCallsListProps {
+  toolCalls: ToolCallData[];
+}
+
+const ToolCallsList: React.FC<ToolCallsListProps> = ({ toolCalls }) => {
+  if (toolCalls.length === 0) return null;
+
+  return h(Box, { flexDirection: 'column', marginY: 1 },
+    ...toolCalls.map((tc, i) =>
+      h(ToolCallIndicator, { key: tc.id || i, toolCall: tc })
+    )
+  );
 };
 
 interface StatusBarProps {
@@ -456,6 +550,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolCallData[]>([]);
   const startTime = useRef<number | null>(null);
 
   // Context manager for file attachments
@@ -680,11 +775,28 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
             updateTimer.current = null;
           }
           flushBuffer();
-          addMessage('tool', `🔧 ${tool}: ${JSON.stringify(args).substring(0, 100)}...`);
+
+          // Create tool call with unique ID
+          const toolCallId = `${tool}_${Date.now()}`;
+          const argsStr = JSON.stringify(args).substring(0, 100);
+          const newToolCall: ToolCallData = {
+            id: toolCallId,
+            name: tool,
+            args: argsStr,
+            status: 'running',
+            startTime: Date.now()
+          };
+
+          setActiveToolCalls(prev => [...prev, newToolCall]);
           return true;
         },
-        onToolResult: (tool: string, _result: unknown) => {
-          addMessage('tool', `✓ ${tool} completed`);
+        onToolResult: (tool: string, result: unknown) => {
+          // Update tool call status to completed
+          setActiveToolCalls(prev => prev.map(tc =>
+            tc.name === tool && tc.status === 'running'
+              ? { ...tc, status: 'completed' as const, result: String(result).slice(0, 100) }
+              : tc
+          ));
         },
         onEnd: () => {
           // Clear timer and final flush
@@ -706,6 +818,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
           setCurrentResponse('');
           setIsLoading(false);
           setIsTyping(false);
+          // Clear active tool calls after a short delay to show completion
+          setTimeout(() => setActiveToolCalls([]), 1500);
         },
         onError: (err: Error) => {
           if (updateTimer.current) {
@@ -1364,8 +1478,11 @@ Config file: ~/.zesbe/mcp.json`);
         h(Message, { key: `${i}-${msg.role}`, ...msg })
       ),
 
+      // Active tool calls (Claude-style indicators)
+      activeToolCalls.length > 0 && h(ToolCallsList, { toolCalls: activeToolCalls }),
+
       // Assessing indicator (before AI responds)
-      isLoading && h(AssessingIndicator, { agentName: 'Zesbe' }),
+      isLoading && !activeToolCalls.some(tc => tc.status === 'running') && h(AssessingIndicator, { agentName: 'Zesbe' }),
 
       // Typing indicator (while AI is responding)
       isTyping && currentResponse && h(Box, { flexDirection: 'column', marginY: 1 },

@@ -28,6 +28,8 @@ export {
   isCommand,
   parseCommand,
   executeCommand,
+  findMatchingCommands,
+  getBestMatch,
 } from './commands.js';
 
 export type {

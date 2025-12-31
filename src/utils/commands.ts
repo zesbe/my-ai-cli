@@ -84,6 +84,44 @@ export function parseCommand(input: string): { name: string; args: string[] } | 
   return { name, args };
 }
 
+/**
+ * Find commands matching a prefix (for partial matching)
+ */
+export function findMatchingCommands(prefix: string): Command[] {
+  const lowerPrefix = prefix.toLowerCase();
+  const allCmds = getAllCommands();
+
+  // First try exact match
+  const exact = allCmds.filter(cmd =>
+    cmd.name === lowerPrefix || cmd.aliases.includes(lowerPrefix)
+  );
+  if (exact.length > 0) return exact;
+
+  // Then try prefix match on name
+  const prefixMatches = allCmds.filter(cmd =>
+    cmd.name.startsWith(lowerPrefix) || cmd.aliases.some(a => a.startsWith(lowerPrefix))
+  );
+
+  return prefixMatches;
+}
+
+/**
+ * Get best matching command for partial input
+ */
+export function getBestMatch(name: string): Command | null {
+  // Try exact match first
+  const exact = getCommand(name);
+  if (exact) return exact;
+
+  // Try prefix matching
+  const matches = findMatchingCommands(name);
+  if (matches.length === 1) {
+    return matches[0]; // Unambiguous match
+  }
+
+  return null;
+}
+
 // Execute a command
 export async function executeCommand(input: string, context: CommandContext): Promise<CommandResult> {
   const parsed = parseCommand(input);
@@ -91,12 +129,37 @@ export async function executeCommand(input: string, context: CommandContext): Pr
     return { success: false, message: 'Invalid command format' };
   }
 
-  const command = getCommand(parsed.name);
+  // Try exact match first, then partial match
+  let command = getCommand(parsed.name);
+
   if (!command) {
-    return {
-      success: false,
-      message: `Unknown command: /${parsed.name}\nType /help for available commands.`
-    };
+    // Try partial/prefix matching
+    const matches = findMatchingCommands(parsed.name);
+
+    if (matches.length === 1) {
+      command = matches[0];
+    } else if (matches.length > 1) {
+      // Multiple matches - show suggestions
+      const suggestions = matches.map(m => chalk.green('/' + m.name)).join(', ');
+      return {
+        success: false,
+        message: `Ambiguous command: /${parsed.name}\nDid you mean: ${suggestions}`
+      };
+    } else {
+      // No matches at all - suggest similar commands
+      const allCmds = getAllCommands();
+      const similar = allCmds
+        .filter(cmd => cmd.name.includes(parsed.name) || parsed.name.includes(cmd.name.slice(0, 2)))
+        .slice(0, 3)
+        .map(m => chalk.green('/' + m.name));
+
+      return {
+        success: false,
+        message: `Unknown command: /${parsed.name}` +
+          (similar.length > 0 ? `\nSimilar: ${similar.join(', ')}` : '') +
+          `\nType /help for available commands.`
+      };
+    }
   }
 
   try {
