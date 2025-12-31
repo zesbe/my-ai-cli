@@ -43,6 +43,7 @@ export interface AgentOptions {
   yolo?: boolean;
   stream?: boolean;
   cwd?: string;
+  maxSteps?: number; // 0 = unlimited
 }
 
 export interface AgentStats {

@@ -19,7 +19,7 @@ import type { AgentOptions, AgentStats, Message, ChatCallbacks, Session, ToolCal
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DEFAULT_MAX_STEPS = 50; // Increased from 15 to allow more file operations
+const DEFAULT_MAX_STEPS = 0; // 0 = unlimited (no step limit)
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
@@ -584,7 +584,8 @@ export class Agent {
       system: this.systemPrompt,
       messages,
       tools,
-      stopWhen: stepCountIs(this.maxSteps),
+      // Only limit steps if maxSteps > 0, otherwise unlimited
+      ...(this.maxSteps > 0 ? { stopWhen: stepCountIs(this.maxSteps) } : {}),
       onStepFinish: ({ toolCalls }) => {
         // Track tool calls
         if (toolCalls && toolCalls.length > 0) {
@@ -651,7 +652,8 @@ export class Agent {
       system: this.systemPrompt,
       messages,
       tools,
-      stopWhen: stepCountIs(this.maxSteps),
+      // Only limit steps if maxSteps > 0, otherwise unlimited
+      ...(this.maxSteps > 0 ? { stopWhen: stepCountIs(this.maxSteps) } : {}),
       onStepFinish: ({ toolCalls }) => {
         if (toolCalls && toolCalls.length > 0) {
           this.stats.toolCalls += toolCalls.length;

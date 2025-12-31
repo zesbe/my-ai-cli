@@ -29,6 +29,7 @@ interface CLIOptions {
   stream: boolean;
   classic: boolean;
   setup: boolean;
+  maxSteps: number;
 }
 
 program
@@ -44,6 +45,7 @@ program
   .option('-q, --quiet', 'Skip welcome screen')
   .option('--no-stream', 'Disable streaming output')
   .option('--classic', 'Use classic readline mode instead of Ink')
+  .option('--max-steps <n>', 'Max tool steps per turn (0 = unlimited)', '0')
   .option('--setup', 'Run setup wizard')
   .argument('[prompt...]', 'Initial prompt')
   .action(async (promptArgs: string[], options: CLIOptions) => {
@@ -117,7 +119,8 @@ program
       baseUrl,
       systemPrompt: options.system,
       yolo: options.yolo,
-      stream: options.stream !== false
+      stream: options.stream !== false,
+      maxSteps: parseInt(options.maxSteps as unknown as string) || 0
     });
 
     // Start CLI
