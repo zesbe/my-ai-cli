@@ -484,6 +484,50 @@ const ProviderMenu: React.FC<ProviderMenuProps> = ({ onSelect, onCancel, current
   );
 };
 
+// YOLO Menu with ON/OFF selection
+interface YoloMenuProps {
+  onSelect: (value: boolean) => void;
+  onCancel: () => void;
+  current: boolean;
+}
+
+const YoloMenu: React.FC<YoloMenuProps> = ({ onSelect, onCancel, current }) => {
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  const items = [
+    { label: '⚡ ON - Auto-approve all tools', value: true, description: 'Tools run without confirmation' },
+    { label: '🛡️ OFF - Safe mode', value: false, description: 'Show what tools will do (visual only)' }
+  ];
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'yellow',
+    paddingX: 1
+  },
+    h(Text, { color: 'yellow', bold: true }, '⚡ YOLO Mode:'),
+    h(SelectInput, {
+      items: items.map(i => ({
+        label: i.label,
+        value: i.value,
+        isCurrent: i.value === current,
+        desc: i.description
+      })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, isCurrent, desc }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Text, {
+            color: isSelected ? 'yellow' : (isCurrent ? 'green' : 'white'),
+            bold: isSelected
+          }, `${isSelected ? '▸ ' : '  '}${label}${isCurrent ? ' ✓' : ''}`),
+          h(Text, { color: 'gray', dimColor: true }, `    ${desc}`)
+        )
+    } as any)
+  );
+};
+
 interface ModelMenuProps {
   provider: string;
   onSelect: (value: string) => void;
@@ -967,6 +1011,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showMCPBrowseMenu, setShowMCPBrowseMenu] = useState(false);
   const [showMCPMarketplaceMenu, setShowMCPMarketplaceMenu] = useState(false);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
+  const [showYoloMenu, setShowYoloMenu] = useState(false);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
   const [apiKeyDialogProvider, setApiKeyDialogProvider] = useState('');
@@ -1026,6 +1071,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       setShowMCPBrowseMenu(false);
       setShowMCPMarketplaceMenu(false);
       setShowSkillsMenu(false);
+      setShowYoloMenu(false);
       setShowAuthDialog(false);
       setShowApiKeyDialog(false);
       completionCycler.current.reset();
@@ -1109,8 +1155,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   }, []);
 
   useEffect(() => {
-    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showAuthDialog && !showApiKeyDialog);
-  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showAuthDialog, showApiKeyDialog]);
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showYoloMenu && !showAuthDialog && !showApiKeyDialog);
+  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showYoloMenu, showAuthDialog, showApiKeyDialog]);
 
   const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
     setMessages(prev => [...prev, {
@@ -1444,8 +1490,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
         break;
 
       case '/yolo':
-        agent.yolo = !agent.yolo;
-        addMessage('success', `Auto-approve: ${agent.yolo ? 'ON ⚡' : 'OFF'}`);
+        // Show interactive YOLO menu
+        setShowYoloMenu(true);
         break;
 
       case '/config':
@@ -1911,6 +1957,13 @@ Config file: ~/.zesbe/mcp.json`);
     addMessage('success', `Model: ${id}`);
   };
 
+  // Handler for YOLO menu selection
+  const handleYoloSelect = (value: boolean): void => {
+    setShowYoloMenu(false);
+    agent.yolo = value;
+    addMessage('success', `⚡ YOLO Mode: ${value ? 'ON - Auto-approve enabled' : 'OFF - Safe mode'}`);
+  };
+
   // Handler for MCP Browse menu selection
   const handleMCPBrowseSelect = (server: any): void => {
     setShowMCPBrowseMenu(false);
@@ -2087,6 +2140,11 @@ Config file: ~/.zesbe/mcp.json`);
       loadedSkills: loadedSkills,
       onSelect: handleSkillsSelect,
       onCancel: () => setShowSkillsMenu(false)
+    }),
+    showYoloMenu && h(YoloMenu, {
+      onSelect: handleYoloSelect,
+      onCancel: () => setShowYoloMenu(false),
+      current: agent.yolo
     }),
 
     // API Key Dialog (popup modal)
