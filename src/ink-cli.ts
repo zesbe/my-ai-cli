@@ -12,6 +12,16 @@ import path from 'path';
 import os from 'os';
 import type { Agent as AgentType } from './agent.js';
 
+// Import new utilities
+import { processSimpleMarkdown, renderMarkdown, highlightCodeBlocks } from './utils/index.js';
+import { copyToClipboard, readFromClipboard, isClipboardAvailable, matchShortcut, formatShortcut, getShortcutsByCategory, DEFAULT_SHORTCUTS } from './utils/clipboard.js';
+import { ContextManager, createFilePreview, formatContextInfo } from './utils/context.js';
+import { saveConversation, listConversations, searchConversations, exportConversation, formatConversationList, formatSearchResults } from './utils/export.js';
+import type { ChatMessage, ExportFormat } from './utils/export.js';
+import { getCompletions, CompletionCycler } from './utils/completion.js';
+import type { CompletionContext } from './utils/completion.js';
+import { createFileDiff } from './utils/diff.js';
+
 // Session helper
 const SESSION_DIR = path.join(os.homedir(), '.zesbe', 'sessions');
 
@@ -106,6 +116,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { value: '/config', label: '/config', description: 'Show configuration' },
   { value: '/skills', label: '/skills', description: '📚 Skills management' },
   { value: '/mcp', label: '/mcp', description: '🔌 MCP server management' },
+  { value: '/attach', label: '/attach', description: '📎 Attach file to context' },
+  { value: '/detach', label: '/detach', description: '📎 Remove file from context' },
+  { value: '/files', label: '/files', description: '📁 List attached files' },
+  { value: '/preview', label: '/preview', description: '👁️ Preview file content' },
+  { value: '/export', label: '/export', description: '📤 Export conversation' },
+  { value: '/history', label: '/history', description: '📜 Search conversation history' },
+  { value: '/copy', label: '/copy', description: '📋 Copy last response' },
+  { value: '/paste', label: '/paste', description: '📋 Paste from clipboard' },
+  { value: '/shortcuts', label: '/shortcuts', description: '⌨️ Show keyboard shortcuts' },
+  { value: '/diff', label: '/diff', description: '📊 Show diff between files' },
   { value: '/exit', label: '/exit', description: 'Exit CLI' },
 ];
 
@@ -435,7 +455,21 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const startTime = useRef<number | null>(null);
+
+  // Context manager for file attachments
+  const contextManager = useRef(new ContextManager());
+
+  // Completion cycler for tab completion
+  const completionCycler = useRef(new CompletionCycler());
+
+  // Input history for up/down arrow navigation
+  const inputHistory = useRef<string[]>([]);
+  const historyIndex = useRef(-1);
+
+  // Last AI response for /copy command
+  const lastResponse = useRef<string>('');
 
   // Buffered response for smoother rendering (reduce flicker)
   const responseBuffer = useRef('');
@@ -456,15 +490,91 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       agent.clearHistory();
       setTotalTokens(0);
     }
-    // ESC to interrupt
-    if (key.escape && (isLoading || isTyping)) {
-      if (abortController.current) {
-        abortController.current.abort();
+    // ESC to interrupt or close menus
+    if (key.escape) {
+      if (isLoading || isTyping) {
+        if (abortController.current) {
+          abortController.current.abort();
+        }
+        setIsLoading(false);
+        setIsTyping(false);
+        setCurrentResponse('');
+        addMessage('system', '⚠️ Interrupted by user');
       }
-      setIsLoading(false);
-      setIsTyping(false);
-      setCurrentResponse('');
-      addMessage('system', '⚠️ Interrupted by user');
+      setShowSlashMenu(false);
+      setShowProviderMenu(false);
+      setShowModelMenu(false);
+      completionCycler.current.reset();
+    }
+
+    // Up arrow - previous input history
+    if (key.upArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (inputHistory.current.length > 0) {
+        if (historyIndex.current < inputHistory.current.length - 1) {
+          historyIndex.current++;
+          setQuery(inputHistory.current[inputHistory.current.length - 1 - historyIndex.current]);
+        }
+      }
+    }
+
+    // Down arrow - next input history
+    if (key.downArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (historyIndex.current > 0) {
+        historyIndex.current--;
+        setQuery(inputHistory.current[inputHistory.current.length - 1 - historyIndex.current]);
+      } else if (historyIndex.current === 0) {
+        historyIndex.current = -1;
+        setQuery('');
+      }
+    }
+
+    // Tab - autocomplete
+    if (key.tab && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      const completionContext: CompletionContext = {
+        cwd: process.cwd(),
+        providers: Object.keys(PROVIDERS),
+        models: Object.fromEntries(
+          Object.keys(PROVIDERS).map(p => [p, getModelsForProvider(p).map(m => m.id)])
+        ),
+        history: inputHistory.current,
+        currentProvider: agent.provider
+      };
+
+      if (!completionCycler.current.hasCompletions()) {
+        const completions = getCompletions(query, query.length, completionContext);
+        if (completions.length > 0) {
+          completionCycler.current.setCompletions(completions, query, query.length);
+        }
+      }
+
+      if (completionCycler.current.hasCompletions()) {
+        const result = key.shift
+          ? completionCycler.current.previous()
+          : completionCycler.current.next();
+        if (result.completion) {
+          setQuery(result.input);
+        }
+      }
+    }
+
+    // Ctrl+V - paste from clipboard
+    if (key.ctrl && input === 'v') {
+      readFromClipboard().then(text => {
+        if (text) {
+          setQuery(prev => prev + text);
+        }
+      });
+    }
+
+    // Ctrl+Y - copy last response
+    if (key.ctrl && input === 'y') {
+      if (lastResponse.current) {
+        copyToClipboard(lastResponse.current).then(success => {
+          if (success) {
+            addMessage('success', '📋 Copied last response to clipboard');
+          }
+        });
+      }
     }
   });
 
@@ -490,6 +600,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const handleSubmit = async (input: string): Promise<void> => {
     if (!input.trim()) return;
 
+    // Save to input history
+    if (!input.startsWith('/') || input.trim() !== inputHistory.current[inputHistory.current.length - 1]) {
+      inputHistory.current.push(input.trim());
+      if (inputHistory.current.length > 100) {
+        inputHistory.current.shift();
+      }
+    }
+    historyIndex.current = -1;
+
+    // Reset completion cycler
+    completionCycler.current.reset();
+
     if (input.startsWith('/')) {
       await executeCommand(input.trim());
       setQuery('');
@@ -497,6 +619,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
     }
 
     setShowSlashMenu(false);
+
+    // Build context message from attached files
+    let userInput = input;
+    const ctxMsg = contextManager.current.buildContextMessage();
+    if (ctxMsg && attachedFiles.length > 0) {
+      userInput = `${ctxMsg}\n\nUser message: ${input}`;
+    }
+
     addMessage('user', input);
     setQuery('');
     setIsLoading(true);
@@ -567,7 +697,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
           setResponseTime(`${elapsed}s`);
           setTotalTokens(prev => prev + tokens);
           if (fullResponse) {
-            addMessage('assistant', fullResponse, { tokens });
+            // Save for /copy command
+            lastResponse.current = fullResponse;
+            // Apply syntax highlighting to code blocks
+            const processedResponse = highlightCodeBlocks(fullResponse);
+            addMessage('assistant', processedResponse, { tokens });
           }
           setCurrentResponse('');
           setIsLoading(false);
@@ -621,6 +755,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   /resume          Resume last session
   /sessions        List all saved sessions
 
+📎 FILES & CONTEXT:
+  /attach <file>   Attach file to context
+  /detach <file>   Remove file from context
+  /files           List attached files
+  /preview <file>  Preview file content
+  /diff <f1> <f2>  Show diff between files
+
+📤 EXPORT & HISTORY:
+  /export [fmt]    Export chat (markdown/json/html/text)
+  /history [query] Search conversation history
+  /copy            Copy last response
+  /paste           Paste from clipboard
+
 🛠️ TOOLS (AI can use):
   bash, read, write, edit, glob, grep, web_fetch
   + MCP tools from connected servers
@@ -630,23 +777,24 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   /mcp connect      Connect to configured servers
   /mcp disconnect   Disconnect all
   /mcp tools        List MCP tools
-  /mcp browse       Browse popular MCP servers 🆕
-  /mcp search <q>   Search MCP servers 🆕
-  /mcp install <id> Install MCP server 🆕
-  /mcp marketplace  View online marketplaces 🆕
+  /mcp browse       Browse popular MCP servers
+  /mcp search <q>   Search MCP servers
+  /mcp install <id> Install MCP server
+  /mcp marketplace  View online marketplaces
 
 📚 SKILLS:
   /skills           List available skills
   /skills load <id> Load a skill
   /skills create    Create new skill
 
-📄 PROJECT CONTEXT:
-  Create ZESBE.md in project root for custom instructions
-
 ⌨️ SHORTCUTS:
-  Ctrl+C  Exit
-  Ctrl+L  Clear screen
-  ESC     Close menus
+  Ctrl+C      Exit
+  Ctrl+L      Clear screen
+  Ctrl+Y      Copy last response
+  Tab         Auto-complete
+  Up/Down     Input history
+  ESC         Interrupt/Close menus
+  /shortcuts  Full shortcut list
         `);
         break;
 
@@ -1005,6 +1153,149 @@ Then run: /mcp connect`);
   /mcp marketplace  View online marketplaces
 
 Config file: ~/.zesbe/mcp.json`);
+        }
+        break;
+
+      case '/attach':
+        if (!args) {
+          addMessage('system', 'Usage: /attach <file-path>\n\nExample: /attach src/index.ts\n\nUse /files to see attached files');
+        } else {
+          const file = contextManager.current.attachFile(args);
+          if (file) {
+            setAttachedFiles(contextManager.current.getAttachedFiles().map(f => f.path));
+            addMessage('success', `📎 Attached: ${file.name} (${file.tokens} tokens, ${file.language})`);
+          } else {
+            addMessage('error', `Failed to attach: ${args}`);
+          }
+        }
+        break;
+
+      case '/detach':
+        if (!args) {
+          addMessage('system', 'Usage: /detach <file-path|all>\n\nExample: /detach src/index.ts\n        /detach all');
+        } else if (args === 'all') {
+          contextManager.current.detachAll();
+          setAttachedFiles([]);
+          addMessage('success', '📎 All files detached');
+        } else {
+          if (contextManager.current.detachFile(args)) {
+            setAttachedFiles(contextManager.current.getAttachedFiles().map(f => f.path));
+            addMessage('success', `📎 Detached: ${args}`);
+          } else {
+            addMessage('error', `File not attached: ${args}`);
+          }
+        }
+        break;
+
+      case '/files':
+        const files = contextManager.current.getAttachedFiles();
+        if (files.length === 0) {
+          addMessage('system', '📁 No files attached\n\nUse /attach <file> to add files to context');
+        } else {
+          const info = contextManager.current.getContextInfo();
+          addMessage('system', formatContextInfo(info));
+        }
+        break;
+
+      case '/preview':
+        if (!args) {
+          addMessage('system', 'Usage: /preview <file-path>\n\nExample: /preview src/index.ts');
+        } else {
+          const preview = createFilePreview(args, { maxLines: 30 });
+          addMessage('system', preview);
+        }
+        break;
+
+      case '/export':
+        const exportFormat = (args.split(' ')[0] || 'markdown') as ExportFormat;
+        const chatMessages: ChatMessage[] = messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: new Date(m.timestamp || Date.now()),
+            tokens: m.tokens
+          }));
+
+        if (chatMessages.length === 0) {
+          addMessage('system', 'No conversation to export');
+        } else {
+          const conv = saveConversation(chatMessages, agent.provider, agent.model);
+          const exported = exportConversation(conv, exportFormat);
+          const exportPath = path.join(process.cwd(), `chat-${Date.now()}.${exportFormat === 'markdown' ? 'md' : exportFormat}`);
+          fs.writeFileSync(exportPath, exported);
+          addMessage('success', `📤 Exported to: ${exportPath}\nFormat: ${exportFormat}`);
+        }
+        break;
+
+      case '/history':
+        if (args) {
+          const searchResults = searchConversations(args);
+          addMessage('system', formatSearchResults(searchResults, args));
+        } else {
+          const convList = listConversations(10);
+          addMessage('system', formatConversationList(convList));
+        }
+        break;
+
+      case '/copy':
+        if (!lastResponse.current) {
+          addMessage('system', 'No response to copy');
+        } else {
+          const success = await copyToClipboard(lastResponse.current);
+          if (success) {
+            addMessage('success', '📋 Last response copied to clipboard');
+          } else {
+            addMessage('error', 'Failed to copy to clipboard');
+          }
+        }
+        break;
+
+      case '/paste':
+        const clipboardText = await readFromClipboard();
+        if (clipboardText) {
+          setQuery(prev => prev + clipboardText);
+          addMessage('system', `📋 Pasted ${clipboardText.length} characters`);
+        } else {
+          addMessage('system', 'Clipboard is empty');
+        }
+        break;
+
+      case '/shortcuts':
+        const categories = getShortcutsByCategory();
+        let shortcutsHelp = '⌨️ KEYBOARD SHORTCUTS:\n\n';
+        for (const [category, shortcuts] of Object.entries(categories)) {
+          if (shortcuts.length > 0) {
+            shortcutsHelp += `${category}:\n`;
+            for (const shortcut of shortcuts) {
+              shortcutsHelp += `  ${formatShortcut(shortcut).padEnd(15)} ${shortcut.description}\n`;
+            }
+            shortcutsHelp += '\n';
+          }
+        }
+        shortcutsHelp += `CLI Specific:\n`;
+        shortcutsHelp += `  Up/Down        Navigate input history\n`;
+        shortcutsHelp += `  Tab            Auto-complete\n`;
+        shortcutsHelp += `  Shift+Tab      Previous completion\n`;
+        shortcutsHelp += `  Ctrl+Y         Copy last response\n`;
+        shortcutsHelp += `  ESC            Interrupt/Close menus\n`;
+        addMessage('system', shortcutsHelp);
+        break;
+
+      case '/diff':
+        const diffArgs = args.split(' ');
+        if (diffArgs.length < 2) {
+          addMessage('system', 'Usage: /diff <file1> <file2>\n\nExample: /diff old.ts new.ts');
+        } else {
+          try {
+            const oldContent = fs.readFileSync(diffArgs[0], 'utf-8');
+            const newContent = fs.readFileSync(diffArgs[1], 'utf-8');
+            const diff = createFileDiff(diffArgs[0], diffArgs[1], oldContent, newContent);
+            addMessage('system', diff);
+          } catch (e) {
+            const error = e as Error;
+            addMessage('error', `Diff failed: ${error.message}`);
+          }
         }
         break;
 
