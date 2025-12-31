@@ -59,11 +59,10 @@ export async function startInteractiveMode(agent, initialPrompt) {
     terminal: true
   });
 
-  // Show input prompt like Claude CLI
+  // Show input prompt like Claude CLI - fixed at bottom
   const showPrompt = () => {
-    process.stdout.write('\n');
-    process.stdout.write(chalk.cyan('╭─ ') + chalk.gray('You') + '\n');
-    process.stdout.write(chalk.cyan('╰─➤ '));
+    console.log(chalk.gray('─'.repeat(75)));
+    process.stdout.write(chalk.green('> '));
   };
 
   const prompt = () => {
@@ -141,16 +140,13 @@ export async function startInteractiveMode(agent, initialPrompt) {
         await agent.chat(input, {
           onStart: () => {
             spinner.stop();
-            console.log(chalk.magenta('╭─ ') + chalk.gray('Assistant'));
-            console.log(chalk.magenta('│'));
-            process.stdout.write(chalk.magenta('│  '));
+            console.log('');
           },
           onToken: (token) => {
-            // Filter thinking and handle newlines
+            // Filter thinking tags
             const filtered = filter.process(token);
             if (filtered) {
-              const formatted = filtered.replace(/\n/g, '\n' + chalk.magenta('│  '));
-              process.stdout.write(formatted);
+              process.stdout.write(filtered);
             }
           },
           onToolCall: async (tool, args) => {
@@ -171,13 +167,11 @@ export async function startInteractiveMode(agent, initialPrompt) {
             }
           },
           onEnd: () => {
-            console.log('\n' + chalk.magenta('╰─────────────────'));
+            console.log('\n');
           },
           onError: (err) => {
             spinner.stop();
-            console.log(chalk.magenta('│'));
-            console.log(chalk.magenta('│  ') + chalk.red(`✗ Error: ${err.message}`));
-            console.log(chalk.magenta('╰─────────────────'));
+            console.log(chalk.red(`\n✗ Error: ${err.message}\n`));
           }
         });
       } catch (err) {
@@ -191,8 +185,8 @@ export async function startInteractiveMode(agent, initialPrompt) {
 
   // Handle initial prompt
   if (initialPrompt) {
-    console.log(chalk.cyan('╭─ ') + chalk.gray('You'));
-    console.log(chalk.cyan('╰─➤ ') + initialPrompt);
+    console.log(chalk.gray('─'.repeat(75)));
+    console.log(chalk.green('> ') + initialPrompt);
     console.log('');
 
     const spinner = ora({
@@ -207,28 +201,25 @@ export async function startInteractiveMode(agent, initialPrompt) {
       await agent.chat(initialPrompt, {
         onStart: () => {
           spinner.stop();
-          console.log(chalk.magenta('╭─ ') + chalk.gray('Assistant'));
-          console.log(chalk.magenta('│'));
-          process.stdout.write(chalk.magenta('│  '));
+          console.log('');
         },
         onToken: (token) => {
           const filtered = filter.process(token);
           if (filtered) {
-            const formatted = filtered.replace(/\n/g, '\n' + chalk.magenta('│  '));
-            process.stdout.write(formatted);
+            process.stdout.write(filtered);
           }
         },
         onToolCall: async (tool, args) => {
-          console.log(chalk.yellow(`\n${chalk.magenta('│')}\n${chalk.magenta('│')}  🔧 Tool: ${tool}`));
+          console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
           if (!agent.yolo) {
             const approved = await askApproval(rl);
             return approved;
           }
-          console.log(chalk.magenta('│  ') + chalk.green('✓ Auto-approved'));
+          console.log(chalk.green('  ✓ Auto-approved'));
           return true;
         },
         onEnd: () => {
-          console.log('\n' + chalk.magenta('╰─────────────────'));
+          console.log('\n');
         }
       });
     } catch (err) {
