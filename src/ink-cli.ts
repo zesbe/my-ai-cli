@@ -77,6 +77,8 @@ class ChatCLI {
   private isProcessing = false;
   private stdinClosed = false;
   private originalStderr: typeof process.stderr.write;
+  private isInteractive: boolean;
+  private inputQueue: string[] = [];
 
   constructor(agent: AgentType) {
     // Suppress verbose AI SDK error output (printed to stderr)
@@ -101,15 +103,28 @@ class ChatCLI {
     };
 
     // Create readline interface
+    // Use terminal mode only for interactive TTY, not for piped input
+    this.isInteractive = !!process.stdin.isTTY;
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
-      terminal: true
+      terminal: this.isInteractive
     });
 
-    // Handle readline close - but NOT while processing
+    // For piped input, collect all lines into a queue
+    if (!this.isInteractive) {
+      this.rl.on('line', (line) => {
+        this.inputQueue.push(line);
+      });
+    }
+
+    // Handle readline close - but NOT while processing or if we have queued input
     this.rl.on('close', () => {
       this.stdinClosed = true;
+      // For piped mode with queued input, don't exit yet
+      if (!this.isInteractive && this.inputQueue.length > 0) {
+        return;
+      }
       // If we're in the middle of processing, don't exit yet - let processing complete
       if (this.isProcessing) {
         return;
@@ -162,14 +177,30 @@ class ChatCLI {
    */
   private prompt(): void {
     // If stdin was closed while we were processing, exit gracefully now
-    if (this.stdinClosed) {
+    if (this.stdinClosed && this.inputQueue.length === 0) {
       this.cleanup();
       process.exit(0);
     }
 
-    this.rl.question(chalk.cyan('❯ '), async (input) => {
-      await this.handleInput(input);
-    });
+    if (this.isInteractive) {
+      // Interactive mode: use question() for prompt
+      this.rl.question(chalk.cyan('❯ '), async (input) => {
+        await this.handleInput(input);
+      });
+    } else {
+      // Piped mode: process from queue
+      if (this.inputQueue.length > 0) {
+        const input = this.inputQueue.shift()!;
+        process.stdout.write(chalk.cyan('❯ ') + input + '\n');
+        this.handleInput(input).then(() => {
+          // Continue processing queue
+        });
+      } else if (this.stdinClosed) {
+        this.cleanup();
+        process.exit(0);
+      }
+      // If queue is empty but stdin not closed, wait for more input
+    }
   }
 
   /**
@@ -181,6 +212,11 @@ class ChatCLI {
     if (!trimmed) {
       this.prompt();
       return;
+    }
+
+    // Pause readline while processing (interactive mode only)
+    if (this.isInteractive) {
+      this.rl.pause();
     }
 
     // Save to history
@@ -199,6 +235,10 @@ class ChatCLI {
       await this.chat(trimmed);
     }
 
+    // Resume readline and prompt for next input
+    if (this.isInteractive && !this.stdinClosed) {
+      this.rl.resume();
+    }
     this.prompt();
   }
 
@@ -1078,6 +1118,18 @@ ${chalk.gray('Press Ctrl+C to exit')}
 
     if (initialPrompt) {
       await this.chat(initialPrompt);
+    }
+
+    if (!this.isInteractive) {
+      // For piped input, wait for all input to be collected before processing
+      await new Promise<void>((resolve) => {
+        if (this.stdinClosed) {
+          resolve();
+        } else {
+          // Wait for close event
+          this.rl.once('close', () => resolve());
+        }
+      });
     }
 
     this.prompt();
