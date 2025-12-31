@@ -36,6 +36,112 @@ export class Agent {
     this.history = [];
   }
 
+  // Limit history to prevent token overflow
+  trimHistory(maxMessages = 20) {
+    if (this.history.length > maxMessages) {
+      // Keep system context and recent messages
+      this.history = this.history.slice(-maxMessages);
+    }
+  }
+
+  // Continue after tool calls without adding empty user message
+  async continueAfterTools(callbacks = {}) {
+    const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
+
+    try {
+      this.trimHistory();
+      
+      const messages = [
+        { role: 'system', content: this.systemPrompt },
+        ...this.history
+      ];
+
+      if (onStart) onStart();
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages,
+        tools: tools,
+        tool_choice: 'auto',
+        stream: this.stream
+      });
+
+      let assistantMessage = '';
+      let toolCalls = [];
+
+      if (this.stream) {
+        for await (const chunk of response) {
+          const delta = chunk.choices[0]?.delta;
+          if (delta?.content) {
+            assistantMessage += delta.content;
+            if (onToken) onToken(delta.content);
+          }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.index !== undefined) {
+                if (!toolCalls[tc.index]) {
+                  toolCalls[tc.index] = {
+                    id: tc.id || `call_${tc.index}`,
+                    type: 'function',
+                    function: { name: '', arguments: '' }
+                  };
+                }
+                if (tc.function?.name) toolCalls[tc.index].function.name = tc.function.name;
+                if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
+                if (tc.id) toolCalls[tc.index].id = tc.id;
+              }
+            }
+          }
+        }
+      } else {
+        const choice = response.choices[0];
+        assistantMessage = choice.message.content || '';
+        toolCalls = choice.message.tool_calls || [];
+        if (assistantMessage && onToken) onToken(assistantMessage);
+      }
+
+      const historyEntry = { role: 'assistant', content: assistantMessage };
+      if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
+      this.history.push(historyEntry);
+
+      // Handle more tool calls
+      if (toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (!toolCall.function?.name) continue;
+          const toolName = toolCall.function.name;
+          let toolArgs = {};
+          try { toolArgs = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) {}
+
+          let approved = true;
+          if (onToolCall) approved = await onToolCall(toolName, toolArgs);
+
+          if (approved) {
+            const result = await executeTool(toolName, toolArgs);
+            if (onToolResult) onToolResult(toolName, result);
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: typeof result === 'string' ? result : JSON.stringify(result)
+            });
+          } else {
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'Tool rejected by user.'
+            });
+          }
+        }
+        await this.continueAfterTools(callbacks);
+        return;
+      }
+
+      if (onEnd) onEnd();
+    } catch (err) {
+      if (onError) onError(err);
+      else throw err;
+    }
+  }
+
   async chat(userMessage, callbacks = {}) {
     const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
 
@@ -44,6 +150,9 @@ export class Agent {
       role: 'user',
       content: userMessage
     });
+
+    // Trim history to prevent token overflow
+    this.trimHistory();
 
     try {
       // Build messages array
@@ -167,7 +276,7 @@ export class Agent {
         }
 
         // Continue conversation after tool execution
-        await this.chat('', callbacks);
+        await this.continueAfterTools(callbacks);
         return;
       }
 
