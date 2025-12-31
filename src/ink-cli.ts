@@ -6,7 +6,10 @@ import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import { getMCPManager } from './mcp/client.js';
 import { getSkillsManager } from './skills/manager.js';
-import { POPULAR_MCP_SERVERS, searchServers, getServerById, generateInstallConfig, MARKETPLACE_LINKS } from './mcp/marketplace.js';
+import { POPULAR_MCP_SERVERS, searchServers, getServerById, generateInstallConfig, MARKETPLACE_LINKS, fetchRegistry } from './mcp/marketplace.js';
+import { THEMES, DEFAULT_THEME } from './ui/theme.js';
+import type { Theme } from './ui/theme.js';
+import { generateTree } from './utils/tree.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -126,6 +129,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { value: '/copy', label: '/copy', description: '📋 Copy last response' },
   { value: '/paste', label: '/paste', description: '📋 Paste from clipboard' },
   { value: '/shortcuts', label: '/shortcuts', description: '⌨️ Show keyboard shortcuts' },
+  { value: '/theme', label: '/theme', description: '🎨 Change UI Theme' },
+  { value: '/tree', label: '/tree', description: '🌳 Show Project Tree' },
   { value: '/diff', label: '/diff', description: '📊 Show diff between files' },
   { value: '/exit', label: '/exit', description: 'Exit CLI' },
 ];
@@ -165,9 +170,10 @@ const TOOL_ICONS: Record<string, string> = {
 // Components
 interface AssessingIndicatorProps {
   agentName?: string;
+  activity?: string;
 }
 
-const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Zesbe' }) => {
+const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Zesbe', activity }) => {
   const [frame, setFrame] = useState(0);
   const [dots, setDots] = useState('');
 
@@ -179,14 +185,16 @@ const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Ze
     return () => clearInterval(timer);
   }, []);
 
+  const message = activity || `${agentName} sedang memproses`;
+
   return h(Box, {
     justifyContent: 'center',
     marginY: 1,
     paddingX: 2
   },
     h(Text, { color: 'yellow' }, ASSESS_FRAMES[frame]),
-    h(Text, { color: 'gray' }, ` ${agentName} is assessing${dots}`),
-    h(Text, { color: 'gray', dimColor: true }, '  (esc to interrupt)')
+    h(Text, { color: 'gray' }, ` ${message}${dots}`),
+    !activity && h(Text, { color: 'gray', dimColor: true }, '  (esc untuk batal)')
   );
 };
 
@@ -205,12 +213,12 @@ const TypingIndicator: React.FC<TypingIndicatorProps> = ({ type = 'dots' }) => {
   }, [type]);
 
   if (type === 'brain') {
-    return h(Text, { color: 'cyan' }, `${BRAIN_FRAMES[frame]} AI is thinking...`);
+    return h(Text, { color: 'cyan' }, `${BRAIN_FRAMES[frame]} AI sedang berpikir...`);
   }
 
   return h(Box, null,
     h(Text, { color: 'cyan' }, TYPING_FRAMES[frame]),
-    h(Text, { color: 'gray' }, ' AI is typing...')
+    h(Text, { color: 'gray' }, ' AI sedang mengetik...')
   );
 };
 
@@ -254,7 +262,7 @@ const StreamingStatus: React.FC<StreamingStatusProps> = ({ isLoading, isTyping, 
   return null;
 };
 
-// Claude-style Tool Call Indicator
+// Claude-style Tool Call Indicator (Enterprise Grade)
 interface ToolCallIndicatorProps {
   toolCall: ToolCallData;
 }
@@ -262,7 +270,6 @@ interface ToolCallIndicatorProps {
 const ToolCallIndicator: React.FC<ToolCallIndicatorProps> = ({ toolCall }) => {
   const [frame, setFrame] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  const icon = TOOL_ICONS[toolCall.name] || TOOL_ICONS.default;
 
   useEffect(() => {
     if (toolCall.status !== 'running') return;
@@ -273,36 +280,31 @@ const ToolCallIndicator: React.FC<ToolCallIndicatorProps> = ({ toolCall }) => {
     return () => clearInterval(timer);
   }, [toolCall.status, toolCall.startTime]);
 
-  // Truncate args for display
-  const displayArgs = toolCall.args.length > 50 ? toolCall.args.slice(0, 47) + '...' : toolCall.args;
+  const displayArgs = toolCall.args.length > 60 ? toolCall.args.slice(0, 57) + '...' : toolCall.args;
+  const borderColor = toolCall.status === 'running' ? 'yellow' : (toolCall.status === 'error' ? 'red' : 'green');
 
-  if (toolCall.status === 'running') {
-    return h(Box, { marginLeft: 2, marginY: 0 },
-      h(Text, { color: 'yellow' }, TOOL_SPINNER_FRAMES[frame]),
-      h(Text, { color: 'cyan', bold: true }, ` ${toolCall.name}`),
-      h(Text, { color: 'gray' }, `(${displayArgs})`),
-      elapsed > 0 && h(Text, { color: 'gray', dimColor: true }, ` ${elapsed}s`)
-    );
-  }
-
-  if (toolCall.status === 'completed') {
-    return h(Box, { marginLeft: 2, marginY: 0 },
-      h(Text, { color: 'green' }, '✓'),
-      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
-      h(Text, { color: 'gray' }, `(${displayArgs})`),
-      toolCall.result && h(Text, { color: 'gray', dimColor: true }, ` → ${toolCall.result.slice(0, 30)}${toolCall.result.length > 30 ? '...' : ''}`)
-    );
-  }
-
-  if (toolCall.status === 'error') {
-    return h(Box, { marginLeft: 2, marginY: 0 },
-      h(Text, { color: 'red' }, '✗'),
-      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
-      h(Text, { color: 'red' }, ` Error`)
-    );
-  }
-
-  return null;
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: borderColor,
+    paddingX: 1,
+    marginBottom: 0,
+    width: 80 // Fixed width for cleaner look
+  },
+    h(Box, { justifyContent: 'space-between' },
+      h(Box, { gap: 1 },
+        h(Text, { color: borderColor }, toolCall.status === 'running' ? TOOL_SPINNER_FRAMES[frame] : (toolCall.status === 'completed' ? '✓' : '✗')),
+        h(Text, { color: 'cyan', bold: true }, toolCall.name)
+      ),
+      h(Text, { color: 'gray' }, elapsed > 0 ? `${elapsed}s` : '')
+    ),
+    h(Box, { marginTop: 0 },
+      h(Text, { color: 'gray', dimColor: true }, displayArgs)
+    ),
+    toolCall.result && toolCall.status === 'completed' && h(Box, { marginTop: 0, borderStyle: 'single', borderColor: 'gray', paddingX: 1 },
+        h(Text, { color: 'white' }, `→ ${toolCall.result.slice(0, 100)}${toolCall.result.length > 100 ? '...' : ''}`)
+    )
+  );
 };
 
 // Tool Calls List Component
@@ -313,9 +315,59 @@ interface ToolCallsListProps {
 const ToolCallsList: React.FC<ToolCallsListProps> = ({ toolCalls }) => {
   if (toolCalls.length === 0) return null;
 
-  return h(Box, { flexDirection: 'column', marginY: 1 },
+  return h(Box, { flexDirection: 'column', marginY: 1, gap: 0 },
     ...toolCalls.map((tc, i) =>
       h(ToolCallIndicator, { key: tc.id || i, toolCall: tc })
+    )
+  );
+};
+
+// Suggestions Component with Focus Logic
+interface SuggestionsProps {
+  items: string[];
+  isFocused: boolean;
+  onSelect: (item: string) => void;
+}
+
+const Suggestions: React.FC<SuggestionsProps> = ({ items, isFocused, onSelect }) => {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // If items change, reset selection
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [items]);
+
+  useInput((input, key) => {
+    if (!isFocused) return; // Ignore input if not focused!
+
+    if (key.leftArrow) setSelectedIndex(Math.max(0, selectedIndex - 1));
+    if (key.rightArrow) setSelectedIndex(Math.min(items.length - 1, selectedIndex + 1));
+    if (key.return) onSelect(items[selectedIndex]);
+  }, { isActive: isFocused }); // Only active when focused
+
+  if (!items || items.length === 0) return null;
+
+  return h(Box, { marginTop: 1, flexDirection: 'column' },
+    h(Box, { marginBottom: 0 },
+        h(Text, { color: isFocused ? 'cyan' : 'gray', bold: isFocused },
+            isFocused ? '▼ PILIH SARAN (Tekan Enter):' : 'Tekan ↓ untuk memilih saran:'
+        )
+    ),
+    h(Box, { gap: 1 },
+      items.map((item, i) => (
+        h(Box, {
+          key: i,
+          borderStyle: 'round',
+          borderColor: i === selectedIndex && isFocused ? 'cyan' : 'gray',
+          paddingX: 1,
+          borderDimColor: !isFocused
+        },
+          h(Text, {
+              color: i === selectedIndex && isFocused ? 'cyan' : 'gray',
+              dimColor: !isFocused
+          }, item)
+        )
+      ))
     )
   );
 };
@@ -327,27 +379,28 @@ interface StatusBarProps {
   responseTime: string | null;
   yolo: boolean;
   skillsCount: number;
+  theme: Theme;
 }
 
-const StatusBar: React.FC<StatusBarProps> = ({ provider, model, tokens, responseTime, yolo, skillsCount }) => {
+const StatusBar: React.FC<StatusBarProps> = ({ provider, model, tokens, responseTime, yolo, skillsCount, theme }) => {
   const providerName = PROVIDERS[provider]?.name || provider;
 
   return h(Box, {
     borderStyle: 'single',
-    borderColor: 'gray',
+    borderColor: theme.colors.dim,
     paddingX: 1,
     justifyContent: 'space-between',
     marginTop: 1
   },
     h(Box, { gap: 2 },
-      h(Text, { color: 'cyan', bold: true }, `🤖 ${providerName}`),
-      h(Text, { color: 'magenta' }, `📦 ${model}`),
+      h(Text, { color: theme.colors.primary, bold: true }, `${theme.icons.ai} ${providerName}`),
+      h(Text, { color: theme.colors.secondary }, `📦 ${model}`),
       skillsCount > 0 && h(Text, { color: 'blue', bold: true }, `📚 ${skillsCount} skill${skillsCount > 1 ? 's' : ''}`),
-      yolo && h(Text, { color: 'yellow' }, '⚡ YOLO')
+      yolo && h(Text, { color: theme.colors.warning }, '⚡ YOLO')
     ),
     h(Box, { gap: 2 },
-      tokens > 0 && h(Text, { color: 'gray' }, `🎯 ${tokens} tokens`),
-      responseTime && h(Text, { color: 'green' }, `⏱️ ${responseTime}`)
+      tokens > 0 && h(Text, { color: theme.colors.dim }, `🎯 ${tokens} tokens`),
+      responseTime && h(Text, { color: theme.colors.success }, `⏱️ ${responseTime}`)
     )
   );
 };
@@ -356,6 +409,24 @@ interface MessageProps extends MessageData {}
 
 const Message: React.FC<MessageProps> = ({ role, content, timestamp, tokens }) => {
   const time = timestamp ? new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '';
+
+  const renderContent = (text: string) => {
+    // Basic Markdown Checklist rendering
+    if (text.includes('- [ ]') || text.includes('- [x]')) {
+      return h(Box, { flexDirection: 'column' },
+        text.split('\n').map((line, i) => {
+          if (line.trim().startsWith('- [ ]')) {
+            return h(Text, { key: i, color: 'yellow' }, `  ⬜ ${line.replace('- [ ]', '').trim()}`);
+          }
+          if (line.trim().startsWith('- [x]')) {
+            return h(Text, { key: i, color: 'green', dimColor: true }, `  ✅ ${line.replace('- [x]', '').trim()}`);
+          }
+          return h(Text, { key: i, color: 'white' }, line);
+        })
+      );
+    }
+    return h(Text, { color: 'white' }, text);
+  };
 
   if (role === 'user') {
     return h(Box, { flexDirection: 'column', marginY: 1 },
@@ -377,7 +448,7 @@ const Message: React.FC<MessageProps> = ({ role, content, timestamp, tokens }) =
         tokens && h(Text, { color: 'gray', dimColor: true }, `(${tokens} tokens)`)
       ),
       h(Box, { marginLeft: 2 },
-        h(Text, { color: 'white' }, content)
+        renderContent(content)
       )
     );
   }
@@ -574,6 +645,31 @@ const ModelMenu: React.FC<ModelMenuProps> = ({ provider, onSelect, onCancel, cur
   );
 };
 
+// Theme Menu
+interface ThemeMenuProps {
+  onSelect: (theme: string) => void;
+  onCancel: () => void;
+  current: string;
+}
+
+const ThemeMenu: React.FC<ThemeMenuProps> = ({ onSelect, onCancel, current }) => {
+  useInput((_input, key) => { if (key.escape) onCancel(); });
+
+  return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'magenta', paddingX: 1 },
+    h(Text, { color: 'magenta', bold: true }, '🎨 Select Theme:'),
+    h(SelectInput, {
+      items: Object.entries(THEMES).map(([key, t]) => ({ 
+        label: t.name, 
+        value: key,
+        isCurrent: key === current 
+      })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, isCurrent }: any) => 
+        h(Text, { color: isSelected ? 'magenta' : 'white' }, `${isSelected ? '▸ ' : '  '}${label}${isCurrent ? ' ✓' : ''}`)
+    } as any)
+  );
+};
+
 // MCP Main Menu - Like OpenCode's MCP management
 interface MCPMainMenuProps {
   onSelect: (action: string) => void;
@@ -584,14 +680,11 @@ interface MCPMainMenuProps {
 
 // MCP Menu items with action mapping
 const MCP_MENU_OPTIONS = [
-  { label: '📋 List servers', action: 'list', desc: 'View connected servers' },
-  { label: '🔌 Connect all', action: 'connect', desc: 'Connect to all configured MCP servers' },
-  { label: '⚡ Disconnect all', action: 'disconnect', desc: 'Disconnect from all servers' },
-  { label: '🔧 View tools', action: 'tools', desc: 'List available MCP tools' },
-  { label: '🏪 Browse servers', action: 'browse', desc: 'Browse popular MCP servers to install' },
-  { label: '🔍 Search servers', action: 'search', desc: 'Search for MCP servers by name' },
-  { label: '🛒 Marketplace', action: 'marketplace', desc: 'Open online MCP marketplaces' },
-  { label: '⚙️ Edit config', action: 'config', desc: 'Show config file location' },
+  { label: '📂 Manage Installed', action: 'list', desc: 'View and configure installed servers' },
+  { label: '🏪 Marketplace', action: 'browse', desc: 'Browse online registry & install servers' },
+  { label: '🔌 Connect All', action: 'connect', desc: 'Start all configured servers' },
+  { label: '🛑 Disconnect All', action: 'disconnect', desc: 'Stop all running servers' },
+  { label: '🔧 Active Tools', action: 'tools', desc: 'Inspect loaded tools' },
 ] as const;
 
 const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connectedCount, toolsCount }) => {
@@ -648,16 +741,15 @@ const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connected
 
 // MCP Browse Menu with SelectInput
 interface MCPBrowseMenuProps {
+  servers: any[];
   onSelect: (server: any) => void;
   onCancel: () => void;
 }
 
-const MCPBrowseMenu: React.FC<MCPBrowseMenuProps> = ({ onSelect, onCancel }) => {
+const MCPBrowseMenu: React.FC<MCPBrowseMenuProps> = ({ servers, onSelect, onCancel }) => {
   useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
-
-  const servers = POPULAR_MCP_SERVERS.slice(0, 15);
 
   return h(Box, {
     flexDirection: 'column',
@@ -665,7 +757,7 @@ const MCPBrowseMenu: React.FC<MCPBrowseMenuProps> = ({ onSelect, onCancel }) => 
     borderColor: 'green',
     paddingX: 1
   },
-    h(Text, { color: 'green', bold: true }, '🏪 Popular MCP Servers (Select to install):'),
+    h(Text, { color: 'green', bold: true }, `🏪 Marketplace Registry (${servers.length} servers):`),
     h(SelectInput, {
       items: servers.map(s => ({
         label: s.name,
@@ -1071,6 +1163,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const { exit } = useApp();
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<MessageData[]>([]);
+  
+  // Suggestions & Focus Management
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [focusMode, setFocusMode] = useState<'input' | 'suggestions'>('input');
   const [isLoading, setIsLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [currentResponse, setCurrentResponse] = useState('');
@@ -1085,9 +1181,21 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showMCPMarketplaceMenu, setShowMCPMarketplaceMenu] = useState(false);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
   const [showYoloMenu, setShowYoloMenu] = useState(false);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const [themeName, setThemeName] = useState<string>(DEFAULT_THEME);
+  const theme = THEMES[themeName] || THEMES[DEFAULT_THEME];
+
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
   const [apiKeyDialogProvider, setApiKeyDialogProvider] = useState('');
+  
+  // MCP Installation states
+  const [installingServer, setInstallingServer] = useState<any>(null);
+  const [showInstallPathDialog, setShowInstallPathDialog] = useState(false);
+  const [showInstallTokenDialog, setShowInstallTokenDialog] = useState(false);
+  const [showCustomInstallDialog, setShowCustomInstallDialog] = useState(false);
+
+  const [registryServers, setRegistryServers] = useState<any[]>([]);
   const [availableSkills, setAvailableSkills] = useState<any[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<any[]>([]);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
@@ -1129,6 +1237,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
     }
     // ESC to interrupt or close menus
     if (key.escape) {
+      if (focusMode === 'suggestions') {
+        setFocusMode('input');
+        return;
+      }
       if (isLoading || isTyping) {
         if (abortController.current) {
           abortController.current.abort();
@@ -1146,13 +1258,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       setShowMCPMarketplaceMenu(false);
       setShowSkillsMenu(false);
       setShowYoloMenu(false);
+      setShowThemeMenu(false);
       setShowAuthDialog(false);
       setShowApiKeyDialog(false);
       completionCycler.current.reset();
     }
 
-    // Up arrow - previous input history
+    // Up arrow - previous input history OR move focus back to input
     if (key.upArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (focusMode === 'suggestions') {
+        setFocusMode('input');
+        return;
+      }
       if (inputHistory.current.length > 0) {
         if (historyIndex.current < inputHistory.current.length - 1) {
           historyIndex.current++;
@@ -1161,8 +1278,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       }
     }
 
-    // Down arrow - next input history
-    if (key.downArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+    // Down arrow - next input history OR move focus to suggestions
+    if ((key.downArrow || (key.tab && query === '')) && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (focusMode === 'input' && suggestions.length > 0) {
+         setFocusMode('suggestions');
+         return;
+      }
       if (historyIndex.current > 0) {
         historyIndex.current--;
         setQuery(inputHistory.current[inputHistory.current.length - 1 - historyIndex.current]);
@@ -1229,8 +1350,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   }, []);
 
   useEffect(() => {
-    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPMainMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showYoloMenu && !showAuthDialog && !showApiKeyDialog);
-  }, [query, showProviderMenu, showModelMenu, showMCPMainMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showYoloMenu, showAuthDialog, showApiKeyDialog]);
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPMainMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showYoloMenu && !showThemeMenu && !showAuthDialog && !showApiKeyDialog);
+  }, [query, showProviderMenu, showModelMenu, showMCPMainMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showYoloMenu, showThemeMenu, showAuthDialog, showApiKeyDialog]);
 
   const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
     setMessages(prev => [...prev, {
@@ -1305,9 +1426,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
             fullResponse += token;
             tokens++;
 
-            // Direct update (no buffering for faster response)
-            setCurrentResponse(fullResponse);
-            setTokenCount(tokens);
+            // Buffer the response
+            responseBuffer.current = fullResponse;
+            tokenBuffer.current = tokens;
+
+            // Throttle UI updates (30fps) to prevent flickering
+            if (!updateTimer.current) {
+              updateTimer.current = setTimeout(() => {
+                flushBuffer();
+                updateTimer.current = null;
+              }, 33);
+            }
           }
         },
         onToolCall: async (tool: string, args: Record<string, unknown>) => {
@@ -1356,6 +1485,28 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
             // Apply syntax highlighting to code blocks
             const processedResponse = highlightCodeBlocks(fullResponse);
             addMessage('assistant', processedResponse, { tokens });
+
+            // Generate AI-powered suggestions
+            agent.generateSuggestions().then(aiSuggestions => {
+              // Filter out suggestions that are just copies of the response or too long
+              const validSuggestions = aiSuggestions.filter(s => 
+                s.length < 50 && // Too long
+                !fullResponse.includes(s) && // Part of response
+                s.trim().length > 0
+              );
+
+              if (validSuggestions.length > 0) {
+                setSuggestions(validSuggestions);
+              } else {
+                // Fallback logic if AI suggestions fail
+                const isIndo = /[aiueo]da\s|[aiueo]kan\s|yang|bisa|saya|ini|itu/i.test(fullResponse);
+                if (isIndo) {
+                  setSuggestions(['Ceritakan lebih lanjut', 'Jelaskan detailnya', 'Contoh lain']);
+                } else {
+                  setSuggestions(['Tell me more', 'Explain in detail', 'Show examples']);
+                }
+              }
+            });
           }
           setCurrentResponse('');
           setIsLoading(false);
@@ -1814,20 +1965,8 @@ Then run: /mcp connect`);
             break;
           }
 
-          addMessage('system', `📦 Installing: ${server.name}\n${server.description}\n`);
-
-          // Check if requires path or token
-          if (server.install.requiresPath) {
-            addMessage('system', `⚠️ This server requires a PATH parameter.\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args).replace('{PATH}', '"/path/to/directory"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
-          } else if (server.install.requiresToken) {
-            addMessage('system', `⚠️ This server requires: ${server.install.requiresToken}\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args)},\n      "env": ${JSON.stringify(server.install.env, null, 2).replace('{TOKEN}', '"your-token-here"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
-          } else {
-            // Auto-install (no requirements)
-            const config = mcpManager.loadConfig();
-            config.mcpServers[server.id] = generateInstallConfig(server);
-            mcpManager.saveConfig(config);
-            addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
-          }
+          // Use the interactive handler we just improved
+          handleMCPBrowseSelect(server);
         } else if (mcpCmd === 'marketplace') {
           // Show interactive menu for marketplaces
           setShowMCPMarketplaceMenu(true);
@@ -1972,6 +2111,23 @@ Config file: ~/.zesbe/mcp.json`);
         addMessage('system', shortcutsHelp);
         break;
 
+      case '/theme':
+        setShowThemeMenu(true);
+        break;
+
+      case '/tree':
+        addMessage('system', '🌳 Generating project tree...');
+        // Generate tree asynchronously to avoid blocking UI
+        setTimeout(() => {
+          const tree = generateTree(process.cwd(), 0, 2); // Depth 2 by default
+          if (tree) {
+            addMessage('system', `🌳 Project Tree:\n\n${tree}`);
+          } else {
+            addMessage('error', 'Failed to generate tree or directory is empty.');
+          }
+        }, 100);
+        break;
+
       case '/diff':
         const diffArgs = args.split(' ');
         if (diffArgs.length < 2) {
@@ -1992,8 +2148,20 @@ Config file: ~/.zesbe/mcp.json`);
       case '/exit':
         // Auto-save on exit
         agent.saveSession('last');
-        console.log('\n👋 Goodbye! Session auto-saved.\n');
-        exit();
+        
+        // Cleanup MCP connections
+        try {
+          const mcpManager = getMCPManager();
+          await mcpManager.disconnectAll();
+        } catch (e) {
+          // Ignore errors during cleanup
+        }
+
+        console.log('\n👋 Sampai jumpa! Sesi disimpan.\n');
+        
+        // Force exit to ensure process terminates
+        exit(); // Ink exit
+        setTimeout(() => process.exit(0), 100); // Hard exit fallback
         break;
 
       default:
@@ -2049,14 +2217,19 @@ Config file: ~/.zesbe/mcp.json`);
       case 'list': {
         const servers = mcpManager.listServers();
         if (servers.length === 0) {
-          addMessage('system', `🔌 MCP: No servers connected.\n\n💡 Use /mcp browse to install popular servers\n   or edit ~/.zesbe/mcp.json manually`);
+          addMessage('system', `🔌 MCP: No servers connected.\n\n💡 Use Marketplace to install popular servers.`);
           // Auto-show browse menu after short delay
-          setTimeout(() => setShowMCPBrowseMenu(true), 500);
+          setTimeout(async () => {
+             addMessage('system', '🔄 Fetching online registry...');
+             const servers = await fetchRegistry();
+             setRegistryServers(servers);
+             setShowMCPBrowseMenu(true);
+          }, 500);
         } else {
           const list = servers.map(s =>
             `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
           ).join('\n');
-          addMessage('system', `🔌 MCP SERVERS (${servers.length}):\n\n${list}`);
+          addMessage('system', `🔌 INSTALLED SERVERS (${servers.length}):\n\n${list}\n\nTo remove, edit ~/.zesbe/mcp.json`);
         }
         break;
       }
@@ -2065,8 +2238,7 @@ Config file: ~/.zesbe/mcp.json`);
         addMessage('system', '🔌 Connecting to MCP servers...');
         mcpManager.connectAll().then(results => {
           if (results.length === 0) {
-            addMessage('system', '⚠️ No servers configured.\n\n💡 Use /mcp browse to add servers first');
-            setTimeout(() => setShowMCPBrowseMenu(true), 500);
+            addMessage('system', '⚠️ No servers configured.');
           } else {
             const summary = results.map(r =>
               r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
@@ -2087,32 +2259,28 @@ Config file: ~/.zesbe/mcp.json`);
       case 'tools': {
         const tools = mcpManager.getToolsForAI();
         if (tools.length === 0) {
-          addMessage('system', '🔧 No MCP tools available.\n\n💡 Run /mcp connect first to connect to servers');
+          addMessage('system', '🔧 No MCP tools available.\n\n💡 Run "Connect All" first.');
         } else {
           const toolList = tools.map(t => `• ${t.function.name}`).join('\n');
-          addMessage('system', `🔧 MCP TOOLS (${tools.length}):\n\n${toolList}`);
+          addMessage('system', `🔧 ACTIVE TOOLS (${tools.length}):\n\n${toolList}`);
         }
         break;
       }
 
       case 'browse': {
-        setShowMCPBrowseMenu(true);
-        break;
-      }
-
-      case 'search': {
-        addMessage('system', '🔍 MCP Search\n\nUsage: /mcp search <query>\n\nExample:\n  /mcp search database\n  /mcp search github\n  /mcp search filesystem');
-        break;
-      }
-
-      case 'marketplace': {
-        setShowMCPMarketplaceMenu(true);
-        break;
-      }
-
-      case 'config': {
-        const configPath = path.join(os.homedir(), '.zesbe', 'mcp.json');
-        addMessage('system', `⚙️ MCP Config File:\n\n${configPath}\n\nEdit this file to add/remove MCP servers.\nThen run /mcp connect to apply changes.`);
+        addMessage('system', '🔄 Fetching online registry...');
+        fetchRegistry().then(servers => {
+           const customOption = {
+             id: 'custom',
+             name: '[+] Custom Install',
+             description: 'Install any MCP server from NPM',
+             author: 'User',
+             official: false,
+             install: { command: 'npx', args: [] }
+           };
+           setRegistryServers([customOption, ...servers]);
+           setShowMCPBrowseMenu(true);
+        });
         break;
       }
 
@@ -2123,22 +2291,49 @@ Config file: ~/.zesbe/mcp.json`);
     }
   };
 
+  // Helper to finish MCP installation after getting all parameters
+  const finishMCPInstallation = (server: any, pathVal?: string, tokenVal?: string): void => {
+    const mcpManager = getMCPManager();
+    const config = mcpManager.loadConfig();
+    
+    const installConfig = generateInstallConfig(server, { 
+      path: pathVal, 
+      token: tokenVal 
+    });
+
+    config.mcpServers = config.mcpServers || {};
+    config.mcpServers[server.id] = {
+      command: installConfig.command,
+      args: installConfig.args,
+      env: installConfig.env
+    };
+
+    mcpManager.saveConfig(config);
+    addMessage('success', `✅ ${server.name} installed successfully!\n\nRun /mcp connect to activate.`);
+    setInstallingServer(null);
+    setShowInstallPathDialog(false);
+    setShowInstallTokenDialog(false);
+  };
+
   // Handler for MCP Browse menu selection
   const handleMCPBrowseSelect = (server: any): void => {
     setShowMCPBrowseMenu(false);
-    const mcpManager = getMCPManager();
+    
+    if (server.id === 'custom') {
+      setShowCustomInstallDialog(true);
+      return;
+    }
 
-    // Check if requires path or token
+    setInstallingServer(server);
+
+    // Check if requires path or token and show appropriate dialog
     if (server.install.requiresPath) {
-      addMessage('system', `📦 ${server.name}\n${server.description}\n\n⚠️ This server requires a PATH parameter.\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args).replace('{PATH}', '"/path/to/directory"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+      setShowInstallPathDialog(true);
     } else if (server.install.requiresToken) {
-      addMessage('system', `📦 ${server.name}\n${server.description}\n\n⚠️ This server requires: ${server.install.requiresToken}\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args)},\n      "env": ${JSON.stringify(server.install.env, null, 2).replace('{TOKEN}', '"your-token-here"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+      setShowInstallTokenDialog(true);
     } else {
       // Auto-install (no requirements)
-      const config = mcpManager.loadConfig();
-      config.mcpServers[server.id] = generateInstallConfig(server);
-      mcpManager.saveConfig(config);
-      addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
+      finishMCPInstallation(server);
     }
   };
 
@@ -2287,6 +2482,7 @@ Config file: ~/.zesbe/mcp.json`);
       current: agent.model
     }),
     showMCPBrowseMenu && h(MCPBrowseMenu, {
+      servers: registryServers,
       onSelect: handleMCPBrowseSelect,
       onCancel: () => setShowMCPBrowseMenu(false)
     }),
@@ -2333,16 +2529,81 @@ Config file: ~/.zesbe/mcp.json`);
       onCancel: () => setShowAuthDialog(false)
     }),
 
+    // MCP Installation Dialogs
+    showInstallPathDialog && h(TextInputDialog, {
+      title: `Install ${installingServer?.name}`,
+      placeholder: 'Enter absolute path...',
+      description: `This server requires a folder path to operate.`,
+      onSubmit: (val) => finishMCPInstallation(installingServer, val),
+      onCancel: () => { setShowInstallPathDialog(false); setInstallingServer(null); }
+    }),
+
+    showInstallTokenDialog && h(TextInputDialog, {
+      title: `Install ${installingServer?.name}`,
+      placeholder: `Enter ${installingServer?.install?.requiresToken}...`,
+      description: `This server requires an API token or key.`,
+      maskInput: true,
+      onSubmit: (val) => finishMCPInstallation(installingServer, undefined, val),
+      onCancel: () => { setShowInstallTokenDialog(false); setInstallingServer(null); }
+    }),
+
+    showCustomInstallDialog && h(TextInputDialog, {
+      title: 'Custom MCP Install',
+      placeholder: 'npm package (e.g. @modelcontextprotocol/server-memory)',
+      description: 'Enter the full NPM package name to install.',
+      onSubmit: (val) => {
+        const pkg = val.trim();
+        if (!pkg) return;
+        const server = {
+          id: pkg.replace(/[@\/]/g, '_').replace(/^_/, ''),
+          name: pkg,
+          install: { command: 'npx', args: ['-y', pkg], env: {} }
+        };
+        // Reuse the finisher
+        const mcpManager = getMCPManager();
+        const config = mcpManager.loadConfig();
+        config.mcpServers = config.mcpServers || {};
+        config.mcpServers[server.id] = {
+          command: server.install.command,
+          args: server.install.args,
+          env: {}
+        };
+        mcpManager.saveConfig(config);
+        addMessage('success', `✅ Custom server ${pkg} installed!\nRun /mcp connect to activate.`);
+        setShowCustomInstallDialog(false);
+      },
+      onCancel: () => setShowCustomInstallDialog(false)
+    }),
+
+    // Theme Menu
+    showThemeMenu && h(ThemeMenu, {
+      current: themeName,
+      onSelect: (t) => { setThemeName(t); setShowThemeMenu(false); },
+      onCancel: () => setShowThemeMenu(false)
+    }),
+
+    // Suggestions
+    suggestions.length > 0 && h(Suggestions, {
+      items: suggestions,
+      isFocused: focusMode === 'suggestions',
+      onSelect: (item) => {
+        setFocusMode('input');
+        // Auto submit the suggestion
+        handleSubmit(item);
+      }
+    }),
+
     // Input
     h(Box, { flexDirection: 'column' },
-      h(Text, { color: 'gray' }, '─'.repeat(60)),
+      h(Text, { color: theme.colors.dim }, '─'.repeat(60)),
       h(Box, null,
-        h(Text, { color: 'cyan', bold: true }, '❯ '),
+        h(Text, { color: focusMode === 'input' ? theme.colors.primary : theme.colors.dim, bold: true }, `${theme.icons.prefix} `),
         h(TextInput, {
           value: query,
           onChange: setQuery,
           onSubmit: handleSubmit,
-          placeholder: 'Type message or / for commands...'
+          placeholder: 'Ketik pesan atau / untuk perintah...',
+          focus: focusMode === 'input'
         })
       ),
       // Status line with streaming indicator
@@ -2350,9 +2611,9 @@ Config file: ~/.zesbe/mcp.json`);
         // Streaming status (animated when active)
         h(StreamingStatus, { isLoading, isTyping, tokenCount: _tokenCount }),
         // Static info (when not streaming)
-        !isLoading && !isTyping && totalTokens > 0 && h(Text, { color: 'gray', dimColor: true }, `🎯 ${totalTokens} tokens`),
-        !isLoading && !isTyping && responseTime && h(Text, { color: 'gray', dimColor: true }, `⏱️ ${responseTime}`),
-        !isLoading && !isTyping && loadedSkillsCount > 0 && h(Text, { color: 'gray', dimColor: true }, `📚 ${loadedSkillsCount} skills`)
+        !isLoading && !isTyping && totalTokens > 0 && h(Text, { color: theme.colors.dim }, `🎯 ${totalTokens} tokens`),
+        !isLoading && !isTyping && responseTime && h(Text, { color: theme.colors.dim }, `⏱️ ${responseTime}`),
+        !isLoading && !isTyping && loadedSkillsCount > 0 && h(Text, { color: theme.colors.secondary }, `📚 ${loadedSkillsCount} skills`)
       )
     )
   );

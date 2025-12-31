@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { showGoodbye } from './ui/welcome.js';
+import { handleMCPCommand } from './mcp-cli.js';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import type { Agent as AgentType } from './agent.js';
@@ -106,6 +107,11 @@ export async function startInteractiveMode(agent: AgentType, initialPrompt?: str
   /model <name>       Ganti model
   /provider <name>    Ganti provider
   /models             List model untuk provider aktif
+
+🔧 MCP & TOOLS:
+  /mcp                Buka MCP Marketplace (Interactive)
+  /mcp -l             List installed MCP servers
+  /tools              Lihat daftar tools yang tersedia
 
 💬 CONVERSATION:
   /clear              Hapus history
@@ -226,6 +232,14 @@ Search:
           console.log(chalk.gray(`  ${star}${m.id.padEnd(25)} ${m.description}`));
         });
         console.log('');
+        return true;
+
+      case '/mcp':
+        const mcpOptions: any = {};
+        if (args === '-l' || args === '--list') mcpOptions.list = true;
+        if (args === '-r' || args === '--remove') mcpOptions.remove = true;
+        
+        await handleMCPCommand(mcpOptions);
         return true;
 
       case '/providers':

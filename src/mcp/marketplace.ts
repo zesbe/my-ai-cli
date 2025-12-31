@@ -201,6 +201,165 @@ export const POPULAR_MCP_SERVERS: MCPServerDefinition[] = [
     },
     stars: 800,
     official: false
+  },
+  {
+    id: 'sequential-thinking',
+    name: 'Sequential Thinking',
+    author: '@modelcontextprotocol',
+    description: 'Dynamic reasoning tool that helps AI solve complex problems step-by-step',
+    category: 'Productivity',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-sequential-thinking']
+    },
+    stars: 2100,
+    official: true
+  },
+  {
+    id: 'exa',
+    name: 'Exa Search',
+    author: '@exa',
+    description: 'Neural search engine designed for AI - find real-time info with precision',
+    category: 'Search',
+    install: {
+      command: 'npx',
+      args: ['-y', 'exa-mcp-server'],
+      env: { EXA_API_KEY: '{TOKEN}' },
+      requiresToken: 'Exa API Key'
+    },
+    stars: 1850,
+    official: true
+  },
+  {
+    id: 'memory',
+    name: 'Knowledge Graph Memory',
+    author: '@modelcontextprotocol',
+    description: 'Persistent memory for AI using a knowledge graph structure',
+    category: 'Knowledge & Memory',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-memory']
+    },
+    stars: 3200,
+    official: true
+  },
+  {
+    id: 'context7',
+    name: 'Context7',
+    author: '@upstash',
+    description: 'Upstash documentation and project metadata retrieval',
+    category: 'Developer Tools',
+    install: {
+      command: 'npx',
+      args: ['-y', '@upstash/context7-mcp'],
+      env: { CONTEXT7_API_KEY: '{TOKEN}' },
+      requiresToken: 'Context7 API Key'
+    },
+    stars: 500,
+    official: true
+  },
+  {
+    id: 'linear',
+    name: 'Linear',
+    author: '@linear',
+    description: 'Manage Linear issues, projects, and cycles',
+    category: 'Productivity',
+    install: {
+      command: 'npx',
+      args: ['-y', '@linear/mcp-server'],
+      env: { LINEAR_API_KEY: '{TOKEN}' },
+      requiresToken: 'Linear API Key'
+    },
+    stars: 1200,
+    official: true
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    author: '@modelcontextprotocol',
+    description: 'Search and read Notion pages and databases',
+    category: 'Productivity',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-notion'],
+      env: { NOTION_API_KEY: '{TOKEN}' },
+      requiresToken: 'Notion API Integration Token'
+    },
+    stars: 1500,
+    official: true
+  },
+  {
+    id: 'supabase',
+    name: 'Supabase',
+    author: '@supabase',
+    description: 'Manage Supabase projects, database, and auth',
+    category: 'Database',
+    install: {
+      command: 'npx',
+      args: ['-y', '@supabase/mcp-server'],
+      env: { SUPABASE_ACCESS_TOKEN: '{TOKEN}' },
+      requiresToken: 'Supabase Access Token'
+    },
+    stars: 1100,
+    official: true
+  },
+  {
+    id: 'gitlab',
+    name: 'GitLab',
+    author: '@modelcontextprotocol',
+    description: 'GitLab integration - manage repos, MRs, pipelines',
+    category: 'Developer Tools',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-gitlab'],
+      env: { GITLAB_ACCESS_TOKEN: '{TOKEN}' },
+      requiresToken: 'GitLab Personal Access Token'
+    },
+    stars: 900,
+    official: true
+  },
+  {
+    id: 'sentry',
+    name: 'Sentry',
+    author: '@sentry',
+    description: 'Retrieve and analyze Sentry issues and errors',
+    category: 'Developer Tools',
+    install: {
+      command: 'npx',
+      args: ['-y', '@sentry/mcp-server'],
+      env: { SENTRY_AUTH_TOKEN: '{TOKEN}' },
+      requiresToken: 'Sentry Auth Token'
+    },
+    stars: 850,
+    official: true
+  },
+  {
+    id: 'chrome-debug',
+    name: 'Chrome DevTools',
+    author: '@stateful',
+    description: 'Debug web pages in Chrome directly from CLI',
+    category: 'Browser Automation',
+    install: {
+      command: 'npx',
+      args: ['-y', '@stateful/mcp-server-chrome-devtools']
+    },
+    stars: 600,
+    official: false
+  },
+  {
+    id: 'mysql',
+    name: 'MySQL',
+    author: '@benborla',
+    description: 'Query and manage MySQL databases',
+    category: 'Database',
+    install: {
+      command: 'npx',
+      args: ['-y', 'mcp-server-mysql'],
+      env: { DATABASE_URL: '{URL}' },
+      requiresToken: 'MySQL Connection URL'
+    },
+    stars: 400,
+    official: false
   }
 ];
 
@@ -216,6 +375,7 @@ export const MCP_CATEGORIES: string[] = [
   'Knowledge & Memory',
   'Image & Video',
   'Note Taking',
+  'Productivity',
   'Developer Tools',
   'API Development'
 ];
@@ -320,5 +480,22 @@ export const MARKETPLACE_LINKS: MarketplaceLink[] = [
     icon: '⭐'
   }
 ];
+
+// Fetch registry from online source (simulated for now)
+export async function fetchRegistry(): Promise<MCPServerDefinition[]> {
+  try {
+    // TODO: Switch to real endpoint when available
+    // const response = await fetch('https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/servers.json');
+    // if (response.ok) return await response.json();
+    
+    // Simulate network delay for "Online" feel
+    return new Promise(resolve => {
+      setTimeout(() => resolve(POPULAR_MCP_SERVERS), 800);
+    });
+  } catch (error) {
+    console.error('Failed to fetch registry:', error);
+    return POPULAR_MCP_SERVERS;
+  }
+}
 
 export type { MCPServerDefinition, InstallConfig, InstallOptions, GeneratedConfig, MarketplaceLink };

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { executeTool } from './tools/index.js';
 import type { ToolExecutionOptions } from '@ai-sdk/provider-utils';
 import { getSkillsManager } from './skills/manager.js';
+import { getMCPManager } from './mcp/client.js';
 import { countTokens } from './utils/tokens.js';
 import fs from 'fs';
 import path from 'path';
@@ -30,6 +31,8 @@ You have access to tools to help accomplish tasks:
 - glob: Find files matching patterns
 - grep: Search for patterns in files
 - git_status, git_diff, git_log, git_commit: Git operations
+
+IMPORTANT: Always respond in the SAME LANGUAGE as the user. If the user speaks Indonesian, respond in Indonesian. If they speak English, respond in English.
 
 When the user asks you to perform tasks, use the appropriate tools.
 Always explain what you're doing before using tools.
@@ -384,6 +387,16 @@ export class Agent {
   private _buildSystemPrompt(): void {
     let systemPrompt = this._baseSystemPrompt;
 
+    // Add MCP Tools to system prompt so AI knows they exist
+    const mcpManager = getMCPManager();
+    const mcpTools = mcpManager.getToolsForAI();
+    if (mcpTools.length > 0) {
+      systemPrompt += `\n\nYou also have access to these external tools (MCP):\n`;
+      mcpTools.forEach(t => {
+        systemPrompt += `- ${t.function.name}: ${t.function.description}\n`;
+      });
+    }
+
     if (this.projectContext) {
       systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
     }
@@ -537,8 +550,8 @@ export class Agent {
         baseUrl: this._baseUrl
       });
 
-      // Create tools with callbacks
-      const tools = createAiSdkTools(
+      // 1. Create Built-in Tools
+      const builtInTools = createAiSdkTools(
         async (name, args) => {
           if (onToolCall) {
             return await onToolCall(name, args);
@@ -547,6 +560,31 @@ export class Agent {
         },
         onToolResult
       );
+
+      // 2. Create MCP Tools (Dynamic)
+      const mcpManager = getMCPManager();
+      const mcpToolsList = mcpManager.getToolsForAI();
+      const mcpTools: Record<string, any> = {};
+
+      for (const t of mcpToolsList) {
+        mcpTools[t.function.name] = tool({
+          description: t.function.description || 'MCP Tool',
+          parameters: z.object({}).passthrough(), // Flexible schema
+          execute: async (args: any, _options: any) => {
+            if (onToolCall) {
+              await onToolCall(t.function.name, args);
+            }
+            const result = await executeTool(t.function.name, args);
+            if (onToolResult) {
+              onToolResult(t.function.name, result);
+            }
+            return typeof result === 'string' ? result : JSON.stringify(result);
+          }
+        } as any);
+      }
+
+      // Merge all tools
+      const tools = { ...builtInTools, ...mcpTools };
 
       const messages = this._convertToAIMessages();
 
@@ -564,6 +602,41 @@ export class Agent {
       } else {
         throw err;
       }
+    }
+  }
+
+  // Generate smart suggestions based on conversation history
+  async generateSuggestions(): Promise<string[]> {
+    try {
+      const model = createModel(this.provider, this.model, {
+        apiKey: this._apiKey,
+        baseUrl: this._baseUrl
+      });
+
+      // Get last few messages for context (User query + AI response)
+      const lastMessages = this._convertToAIMessages().slice(-2);
+      
+      const { text } = await generateText({
+        model,
+        system: `TASK: Generate 3 short follow-up options for the user based on the conversation history.
+FORMAT: Return ONLY 3 phrases separated by a pipe (|). No numbering, no introduction.
+LANGUAGE: Use the same language as the conversation (Indonesian or English).
+CONSTRAINT: Suggestions must be short (2-5 words) and actionable.
+EXAMPLE:
+Refactor code|Add unit tests|Explain logic
+Jelaskan kode|Buat dokumentasi|Optimalkan fungsi
+
+DO NOT repeat the assistant's last response.
+DO NOT output markdown.`,
+        messages: lastMessages,
+      });
+
+      // Parse Pipe-separated output (more robust than JSON)
+      const parts = text.split('|').map(s => s.trim()).filter(s => s.length > 0);
+      return parts.slice(0, 3);
+    } catch (error) {
+      // Fail silently for suggestions
+      return [];
     }
   }
 

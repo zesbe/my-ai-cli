@@ -6,6 +6,8 @@ import readline from 'readline';
 import dotenv from 'dotenv';
 import { startInteractiveMode } from './cli.js';
 import { startInkMode } from './ink-cli.js';
+import { handleMCPCommand } from './mcp-cli.js';
+import { getMCPManager } from './mcp/client.js';
 import { Agent } from './agent.js';
 import { showWelcome } from './ui/welcome.js';
 import { loadConfig, getApiKey, getProviderConfig, saveApiKey, saveConfig } from './config.js';
@@ -35,7 +37,18 @@ interface CLIOptions {
 program
   .name('zesbe')
   .description('Zesbe AI CLI - Your Personal AI Coding Assistant')
-  .version('1.0.0')
+  .version('1.0.0');
+
+program
+  .command('mcp')
+  .description('Manage MCP Servers (Marketplace)')
+  .option('-l, --list', 'List installed servers')
+  .option('-r, --remove', 'Remove a server')
+  .action(async (options) => {
+    await handleMCPCommand(options);
+  });
+
+program
   .option('-m, --model <model>', 'Model to use', config.model)
   .option('-p, --provider <provider>', 'Provider: minimax, openai, anthropic, gemini, ollama, glm', config.provider)
   .option('-b, --base-url <url>', 'Custom API base URL')
@@ -110,6 +123,11 @@ program
         yolo: options.yolo
       });
     }
+
+    // Auto-connect MCP Servers
+    const mcpManager = getMCPManager();
+    console.log(chalk.gray('  🔌 Connecting to MCP servers...'));
+    await mcpManager.connectAll();
 
     // Create agent
     const agent = new Agent({

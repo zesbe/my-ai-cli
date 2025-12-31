@@ -55,7 +55,7 @@ export function showWelcome(options: WelcomeOptions = {}): void {
     '',
     useCompact ? createCompactLogo() : createLogo(),
     '',
-    chalk.white(`  Welcome back, ${chalk.cyan.bold(username)}!`),
+    chalk.white(`  Selamat datang kembali, ${chalk.cyan.bold(username)}!`),
     '',
     chalk.gray(`  🤖 Provider: ${chalk.white(provider)}`),
     chalk.gray(`  📦 Model: ${chalk.white(model)}`),
@@ -79,16 +79,16 @@ export function showWelcome(options: WelcomeOptions = {}): void {
 
   // Status line
   if (options.yolo) {
-    console.log(chalk.yellow('\n  ⚡ YOLO mode enabled - auto-approving all actions\n'));
+    console.log(chalk.yellow('\n  ⚡ Mode YOLO aktif - semua tindakan disetujui otomatis\n'));
   }
 
   // Prompt hints
   console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
-  console.log(chalk.gray('  💡 Type a message or use /help for commands'));
+  console.log(chalk.gray('  💡 Ketik pesan atau gunakan /help untuk perintah'));
   console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
 
   if (options.yolo) {
-    console.log(chalk.green('  ⚡ bypass permissions ON'));
+    console.log(chalk.green('  ⚡ izin akses: OTOMATIS (ON)'));
   }
 
   console.log('');
@@ -103,7 +103,7 @@ export function showHeader(model: string, provider: string): string {
 // Show goodbye message
 export function showGoodbye(): void {
   console.log(boxen(
-    gradient.pastel('\n  👋 Goodbye! Session saved.\n'),
+    gradient.pastel('\n  👋 Sampai jumpa! Sesi telah disimpan.\n'),
     {
       padding: 0,
       margin: { top: 1, bottom: 1 },
