@@ -582,21 +582,34 @@ interface MCPMainMenuProps {
   toolsCount: number;
 }
 
+// Items defined outside component to ensure stable references
+const MCP_MENU_ITEMS = [
+  { label: '📋 List servers', value: 'list' },
+  { label: '🔌 Connect all', value: 'connect' },
+  { label: '⚡ Disconnect all', value: 'disconnect' },
+  { label: '🔧 View tools', value: 'tools' },
+  { label: '🏪 Browse servers', value: 'browse' },
+  { label: '🔍 Search servers', value: 'search' },
+  { label: '🛒 Marketplace', value: 'marketplace' },
+  { label: '⚙️ Edit config', value: 'config' },
+];
+
 const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connectedCount, toolsCount }) => {
   useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
 
-  const items = [
-    { label: '📋 List servers', value: 'list', desc: `View connected servers (${connectedCount} active)` },
-    { label: '🔌 Connect all', value: 'connect', desc: 'Connect to all configured MCP servers' },
-    { label: '⚡ Disconnect all', value: 'disconnect', desc: 'Disconnect from all servers' },
-    { label: '🔧 View tools', value: 'tools', desc: `List available MCP tools (${toolsCount} tools)` },
-    { label: '🏪 Browse servers', value: 'browse', desc: 'Browse popular MCP servers to install' },
-    { label: '🔍 Search servers', value: 'search', desc: 'Search for MCP servers by name' },
-    { label: '🛒 Marketplace', value: 'marketplace', desc: 'Open online MCP marketplaces' },
-    { label: '⚙️ Edit config', value: 'config', desc: 'Show config file location' },
-  ];
+  // Descriptions with dynamic counts
+  const descriptions: Record<string, string> = {
+    list: `View connected servers (${connectedCount} active)`,
+    connect: 'Connect to all configured MCP servers',
+    disconnect: 'Disconnect from all servers',
+    tools: `List available MCP tools (${toolsCount} tools)`,
+    browse: 'Browse popular MCP servers to install',
+    search: 'Search for MCP servers by name',
+    marketplace: 'Open online MCP marketplaces',
+    config: 'Show config file location',
+  };
 
   return h(Box, {
     flexDirection: 'column',
@@ -606,19 +619,17 @@ const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connected
   },
     h(Text, { color: 'cyan', bold: true }, '🔌 MCP Server Management:'),
     h(SelectInput, {
-      items: items.map(i => ({
-        label: i.label,
-        value: i.value,
-        desc: i.desc
-      })),
-      onSelect: (item: any) => onSelect(item.value),
-      itemComponent: ({ isSelected, label, desc }: any) =>
+      items: MCP_MENU_ITEMS,
+      onSelect: (item: { label: string; value: string }) => {
+        onSelect(item.value);
+      },
+      itemComponent: ({ isSelected, label, value }: { isSelected: boolean; label: string; value: string }) =>
         h(Box, { flexDirection: 'column' },
           h(Text, {
             color: isSelected ? 'cyan' : 'white',
             bold: isSelected
           }, `${isSelected ? '▸ ' : '  '}${label}`),
-          h(Text, { color: 'gray', dimColor: true }, `    ${desc}`)
+          h(Text, { color: 'gray', dimColor: true }, `    ${descriptions[value] || ''}`)
         )
     } as any)
   );
