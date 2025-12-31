@@ -6,6 +6,7 @@ import SelectInput from 'ink-select-input';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import { getMCPManager } from './mcp/client.js';
+import { getSkillsManager } from './skills/manager.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -57,6 +58,7 @@ const SLASH_COMMANDS = [
   { value: '/context', label: '/context', description: '📄 Show project context' },
   { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve' },
   { value: '/config', label: '/config', description: 'Show configuration' },
+  { value: '/skills', label: '/skills', description: '📚 Skills management' },
   { value: '/mcp', label: '/mcp', description: '🔌 MCP server management' },
   { value: '/exit', label: '/exit', description: 'Exit CLI' },
 ];
@@ -371,7 +373,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
     if (!input.trim()) return;
     
     if (input.startsWith('/')) {
-      executeCommand(input.trim());
+      await executeCommand(input.trim());
       setQuery('');
       return;
     }
@@ -470,7 +472,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
     }
   };
 
-  const executeCommand = (cmd) => {
+  const executeCommand = async (cmd) => {
     const [command, ...argParts] = cmd.split(' ');
     const args = argParts.join(' ');
 
@@ -674,6 +676,92 @@ Create one of these files in your project root:
             `• ${s.name} (${new Date(s.modified).toLocaleDateString()})\n  ${s.summary}`
           ).join('\n');
           addMessage('system', `📚 SAVED SESSIONS:\n\n${list}\n\nUse /load <name> to load a session`);
+        }
+        break;
+
+      case '/skills':
+        const skillsManager = getSkillsManager();
+        const skillCmd = args.split(' ')[0];
+        const skillArgs = args.split(' ').slice(1).join(' ');
+
+        if (skillCmd === 'list' || !skillCmd) {
+          skillsManager.scanSkills();
+          const available = Array.from(skillsManager.availableSkills.values());
+          const loaded = skillsManager.getLoadedSkills();
+          
+          if (available.length === 0) {
+            addMessage('system', `📚 SKILLS: No skills found.
+
+Create a skill:
+  /skills create <name>
+
+Skills directories:
+  ~/.zesbe/skills/     (user skills)
+  .skills/             (project skills)
+
+Each skill needs a SKILL.md file with:
+---
+name: My Skill
+description: What it does
+---
+
+Instructions for AI...`);
+          } else {
+            const list = available.map(s => {
+              const isLoaded = loaded.find(l => l.id === s.id);
+              return `${isLoaded ? '✅' : '⬚'} ${s.id} - ${s.description || s.name}\n   (${s.source})`;
+            }).join('\n');
+            addMessage('system', `📚 SKILLS:\n\n${list}\n\n/skills load <id> to load\n/skills unload <id> to unload`);
+          }
+        } else if (skillCmd === 'load' && skillArgs) {
+          const result = skillsManager.loadSkill(skillArgs);
+          if (result.success) {
+            agent.refreshSystemPrompt();
+            if (result.alreadyLoaded) {
+              addMessage('system', `Skill "${skillArgs}" already loaded`);
+            } else {
+              addMessage('success', `✅ Loaded skill: ${result.skill.name}\n${result.skill.description}`);
+            }
+          } else {
+            addMessage('error', `Failed to load skill: ${result.error}`);
+          }
+        } else if (skillCmd === 'unload' && skillArgs) {
+          if (skillsManager.unloadSkill(skillArgs)) {
+            agent.refreshSystemPrompt();
+            addMessage('success', `Unloaded skill: ${skillArgs}`);
+          } else {
+            addMessage('error', `Skill "${skillArgs}" is not loaded`);
+          }
+        } else if (skillCmd === 'create' && skillArgs) {
+          const result = skillsManager.createSkillTemplate(skillArgs);
+          if (result.success) {
+            addMessage('success', `✅ Created skill template: ${skillArgs}\nPath: ${result.path}\n\nEdit SKILL.md to customize.`);
+          } else {
+            addMessage('error', `Failed to create skill: ${result.error}`);
+          }
+        } else if (skillCmd === 'loaded') {
+          const loaded = skillsManager.getLoadedSkills();
+          if (loaded.length === 0) {
+            addMessage('system', 'No skills currently loaded. Use /skills load <id>');
+          } else {
+            const list = loaded.map(s => `• ${s.name}: ${s.description}`).join('\n');
+            addMessage('system', `📚 LOADED SKILLS:\n\n${list}`);
+          }
+        } else if (skillCmd === 'refresh') {
+          skillsManager.scanSkills();
+          addMessage('success', `Rescanned skills directories`);
+        } else {
+          addMessage('system', `📚 SKILLS Commands:
+  /skills              List available skills
+  /skills load <id>    Load a skill
+  /skills unload <id>  Unload a skill
+  /skills loaded       Show loaded skills
+  /skills create <id>  Create new skill template
+  /skills refresh      Rescan skills directories
+
+Skills directories:
+  ~/.zesbe/skills/     (user skills)
+  .skills/             (project skills)`);
         }
         break;
 

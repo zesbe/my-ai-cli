@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { getAllTools, executeTool } from './tools/index.js';
+import { getSkillsManager } from './skills/manager.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -72,15 +73,38 @@ export class Agent {
     // Load project context
     this.projectContext = loadProjectContext(this.cwd);
     
-    // Build system prompt with project context
-    let systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-    if (this.projectContext) {
-      systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
-    }
-    this.systemPrompt = systemPrompt;
+    // Store base system prompt
+    this._baseSystemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    
+    // Build full system prompt
+    this._buildSystemPrompt();
 
     // Initialize OpenAI client (works with any OpenAI-compatible API)
     this._initClient();
+  }
+
+  // Build system prompt with project context and skills
+  _buildSystemPrompt() {
+    let systemPrompt = this._baseSystemPrompt;
+    
+    // Add project context
+    if (this.projectContext) {
+      systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
+    }
+    
+    // Add loaded skills
+    const skillsManager = getSkillsManager();
+    const skillsContext = skillsManager.getSkillsContext();
+    if (skillsContext) {
+      systemPrompt += skillsContext;
+    }
+    
+    this.systemPrompt = systemPrompt;
+  }
+
+  // Refresh system prompt (call after loading/unloading skills)
+  refreshSystemPrompt() {
+    this._buildSystemPrompt();
   }
 
   _initClient() {
