@@ -27,9 +27,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     apiKeyFile: '.minimax_api_key',
     description: 'High-performance AI with excellent coding capabilities',
     models: [
-      { id: 'minimax-m2.1', name: 'MiniMax M2.1', description: 'Latest flagship model (Improved)', recommended: true },
-      { id: 'abab6.5-chat', name: 'ABAB 6.5 Chat', description: 'General purpose chat model' },
-      { id: 'abab6.5s-chat', name: 'ABAB 6.5s Chat', description: 'Fast variant' },
+      { id: 'minimax-m2.1', name: 'MiniMax M2.1', description: 'Latest flagship - Best performance', recommended: true },
+      { id: 'minimax-m2', name: 'MiniMax M2', description: 'Standard flagship - 200k context' },
+      { id: 'abab6.5s-chat', name: 'ABAB 6.5s', description: 'Fast & efficient' },
+      { id: 'abab6.5-chat', name: 'ABAB 6.5', description: 'General purpose MoE' },
     ]
   },
   openai: {
