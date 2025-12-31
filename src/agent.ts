@@ -3,6 +3,7 @@ import { getAllTools, executeTool } from './tools/index.js';
 import { getSkillsManager } from './skills/manager.js';
 import fs from 'fs';
 import path from 'path';
+import type { AgentOptions, AgentStats, Message, ChatCallbacks, Session } from './types/index.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
@@ -58,13 +59,13 @@ export class Agent {
   cwd: string;
   stats: AgentStats;
   projectContext: { file: string; content: string } | null;
-  systemPrompt: string;
-  client: OpenAI;
+  systemPrompt!: string;  // Definite assignment assertion
+  client!: OpenAI;  // Definite assignment assertion
   private _apiKey?: string;
   private _baseUrl?: string;
   private _baseSystemPrompt: string;
 
-  constructor(options: AgentOptions = {}) {
+  constructor(options: Partial<AgentOptions> = {}) {
     this.provider = options.provider || 'openai';
     this.model = options.model || 'gpt-4o';
     this._apiKey = options.apiKey;
@@ -250,7 +251,7 @@ export class Agent {
 
       if (onStart) onStart();
 
-      const response = await this.client.chat.completions.create({
+      const response: any = await this.client.chat.completions.create({
         model: this.model,
         messages,
         tools: getAllTools(),
@@ -294,7 +295,7 @@ export class Agent {
 
       const historyEntry = { role: 'assistant', content: assistantMessage };
       if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
-      this.history.push(historyEntry);
+      this.history.push(historyEntry as Message);
 
       // Handle more tool calls
       if (toolCalls.length > 0) {
@@ -314,13 +315,13 @@ export class Agent {
               role: 'tool',
               tool_call_id: toolCall.id,
               content: typeof result === 'string' ? result : JSON.stringify(result)
-            });
+            } as Message);
           } else {
             this.history.push({
               role: 'tool',
               tool_call_id: toolCall.id,
               content: 'Tool rejected by user.'
-            });
+            } as Message);
           }
         }
         await this.continueAfterTools(callbacks);
@@ -412,7 +413,7 @@ export class Agent {
       }
 
       // Add assistant message to history
-      const historyEntry = {
+      const historyEntry: any = {
         role: 'assistant',
         content: assistantMessage
       };
@@ -463,7 +464,7 @@ export class Agent {
               role: 'tool',
               tool_call_id: toolCall.id,
               content: 'Tool execution was rejected by user.'
-            });
+            } as Message);
           }
         }
 
@@ -474,9 +475,9 @@ export class Agent {
 
       if (onEnd) onEnd();
 
-    } catch (err) {
+    } catch (err: unknown) {
       if (onError) {
-        onError(err);
+        onError(err as Error);
       } else {
         throw err;
       }
