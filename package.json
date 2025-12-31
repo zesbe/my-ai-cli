@@ -4,6 +4,7 @@
   "description": "Custom AI CLI Agent - Like Claude Code but with your own model",
   "main": "src/index.js",
   "bin": {
+    "zesbe": "./src/index.js",
     "my-ai": "./src/index.js",
     "ai": "./src/index.js"
   },
