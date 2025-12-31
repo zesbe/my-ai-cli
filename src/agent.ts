@@ -54,51 +54,52 @@ function createModel(provider: ProviderType, model: string, config: ProviderConf
       return createAnthropic({ apiKey })(model);
 
     case 'openai':
-      return createOpenAI({ apiKey, baseURL: baseUrl })(model);
+      // Use .chat() for chat completions API (not responses API)
+      return createOpenAI({ apiKey, baseURL: baseUrl }).chat(model);
 
     case 'glm':
-      // GLM uses OpenAI-compatible API
+      // GLM uses OpenAI-compatible chat completions API
       return createOpenAI({
         apiKey,
         baseURL: baseUrl || 'https://api.z.ai/api/coding/paas/v4/'
-      })(model);
+      }).chat(model);
 
     case 'gemini':
       // Gemini via OpenAI-compatible endpoint
       return createOpenAI({
         apiKey,
         baseURL: baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/'
-      })(model);
+      }).chat(model);
 
     case 'groq':
       return createOpenAI({
         apiKey,
         baseURL: 'https://api.groq.com/openai/v1'
-      })(model);
+      }).chat(model);
 
     case 'together':
       return createOpenAI({
         apiKey,
         baseURL: 'https://api.together.xyz/v1'
-      })(model);
+      }).chat(model);
 
     case 'deepseek':
       return createOpenAI({
         apiKey,
         baseURL: 'https://api.deepseek.com/v1'
-      })(model);
+      }).chat(model);
 
     case 'openrouter':
       return createOpenAI({
         apiKey,
         baseURL: 'https://openrouter.ai/api/v1'
-      })(model);
+      }).chat(model);
 
     default:
       return createOpenAI({
         apiKey,
         baseURL: baseUrl
-      })(model);
+      }).chat(model);
   }
 }
 
