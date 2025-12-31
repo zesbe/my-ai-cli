@@ -165,6 +165,46 @@ const TypingIndicator: React.FC<TypingIndicatorProps> = ({ type = 'dots' }) => {
   );
 };
 
+// Streaming status indicator with animation
+const STREAM_FRAMES = ['▰▱▱▱▱', '▰▰▱▱▱', '▰▰▰▱▱', '▰▰▰▰▱', '▰▰▰▰▰', '▱▰▰▰▰', '▱▱▰▰▰', '▱▱▱▰▰', '▱▱▱▱▰'];
+
+interface StreamingStatusProps {
+  isLoading: boolean;
+  isTyping: boolean;
+  tokenCount: number;
+}
+
+const StreamingStatus: React.FC<StreamingStatusProps> = ({ isLoading, isTyping, tokenCount }) => {
+  const [frame, setFrame] = useState(0);
+  const [dots, setDots] = useState('');
+
+  useEffect(() => {
+    if (!isLoading && !isTyping) return;
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % STREAM_FRAMES.length);
+      setDots(d => d.length >= 3 ? '' : d + '.');
+    }, 150);
+    return () => clearInterval(timer);
+  }, [isLoading, isTyping]);
+
+  if (isLoading) {
+    return h(Box, { gap: 1 },
+      h(Text, { color: 'yellow' }, STREAM_FRAMES[frame]),
+      h(Text, { color: 'yellow' }, `Connecting${dots}`)
+    );
+  }
+
+  if (isTyping) {
+    return h(Box, { gap: 1 },
+      h(Text, { color: 'green' }, STREAM_FRAMES[frame]),
+      h(Text, { color: 'green' }, `Streaming`),
+      tokenCount > 0 && h(Text, { color: 'cyan' }, ` (${tokenCount} tokens)`)
+    );
+  }
+
+  return null;
+};
+
 interface StatusBarProps {
   provider: string;
   model: string;
@@ -1079,11 +1119,14 @@ Config file: ~/.zesbe/mcp.json`);
           placeholder: 'Type message or / for commands...'
         })
       ),
-      // Compact status line (not redundant box)
+      // Status line with streaming indicator
       h(Box, { marginTop: 1, gap: 2 },
-        totalTokens > 0 && h(Text, { color: 'gray', dimColor: true }, `🎯 ${totalTokens} tokens`),
-        responseTime && h(Text, { color: 'gray', dimColor: true }, `⏱️ ${responseTime}`),
-        loadedSkillsCount > 0 && h(Text, { color: 'gray', dimColor: true }, `📚 ${loadedSkillsCount} skills`)
+        // Streaming status (animated when active)
+        h(StreamingStatus, { isLoading, isTyping, tokenCount: _tokenCount }),
+        // Static info (when not streaming)
+        !isLoading && !isTyping && totalTokens > 0 && h(Text, { color: 'gray', dimColor: true }, `🎯 ${totalTokens} tokens`),
+        !isLoading && !isTyping && responseTime && h(Text, { color: 'gray', dimColor: true }, `⏱️ ${responseTime}`),
+        !isLoading && !isTyping && loadedSkillsCount > 0 && h(Text, { color: 'gray', dimColor: true }, `📚 ${loadedSkillsCount} skills`)
       )
     )
   );
