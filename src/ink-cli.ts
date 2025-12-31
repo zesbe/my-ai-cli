@@ -1274,7 +1274,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
 
     // All supported commands for partial matching
     const ALL_COMMANDS = [
-      '/help', '/setup', '/providers', '/provider', '/model', '/apikey', '/free',
+      '/help', '/setup', '/providers', '/provider', '/model', '/apikey', '/auth', '/free',
       '/clear', '/yolo', '/stats', '/context', '/config',
       '/save', '/load', '/resume', '/sessions',
       '/attach', '/detach', '/files', '/preview', '/diff',
@@ -1306,7 +1306,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   /providers       List all providers
   /provider        Switch provider
   /model           Switch model
-  /apikey <key>    Set API key
+  /apikey [key]    Set API key (popup if no key)
+  /auth            🔑 Full authentication setup
   /free            Show FREE providers
 
 💬 CHAT:
