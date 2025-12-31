@@ -289,6 +289,11 @@ const ChatApp = ({ agent, initialPrompt }) => {
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const startTime = useRef(null);
+  
+  // Buffered response for smoother rendering (reduce flicker)
+  const responseBuffer = useRef('');
+  const tokenBuffer = useRef(0);
+  const updateTimer = useRef(null);
 
   // Keyboard shortcuts
   useInput((input, key) => {
@@ -344,6 +349,18 @@ const ChatApp = ({ agent, initialPrompt }) => {
       let fullResponse = '';
       let tokens = 0;
       
+      // Reset buffers
+      responseBuffer.current = '';
+      tokenBuffer.current = 0;
+      
+      // Flush buffer to UI (throttled updates reduce flicker)
+      const flushBuffer = () => {
+        if (responseBuffer.current) {
+          setCurrentResponse(responseBuffer.current);
+          setTokenCount(tokenBuffer.current);
+        }
+      };
+      
       await agent.chat(input, {
         onStart: () => {
           setIsLoading(false);
@@ -353,19 +370,39 @@ const ChatApp = ({ agent, initialPrompt }) => {
           if (!token.includes('<think>') && !token.includes('</think>')) {
             fullResponse += token;
             tokens++;
-            setCurrentResponse(fullResponse);
-            setTokenCount(tokens);
+            
+            // Buffer tokens, update UI every 80ms (reduces flicker)
+            responseBuffer.current = fullResponse;
+            tokenBuffer.current = tokens;
+            
+            if (!updateTimer.current) {
+              updateTimer.current = setTimeout(() => {
+                flushBuffer();
+                updateTimer.current = null;
+              }, 80);
+            }
           }
         },
         onToolCall: async (tool, args) => {
+          // Flush before tool call
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
+          }
+          flushBuffer();
           addMessage('tool', `🔧 ${tool}: ${JSON.stringify(args).substring(0, 100)}...`);
           return true;
         },
         onToolResult: (tool, result) => {
-          const preview = String(result).substring(0, 100);
           addMessage('tool', `✓ ${tool} completed`);
         },
         onEnd: () => {
+          // Clear timer and final flush
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
+          }
+          
           const elapsed = ((Date.now() - startTime.current) / 1000).toFixed(1);
           setResponseTime(`${elapsed}s`);
           setTotalTokens(prev => prev + tokens);
@@ -377,6 +414,10 @@ const ChatApp = ({ agent, initialPrompt }) => {
           setIsTyping(false);
         },
         onError: (err) => {
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
+          }
           addMessage('error', err.message);
           setIsLoading(false);
           setIsTyping(false);
