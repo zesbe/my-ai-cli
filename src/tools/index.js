@@ -4,6 +4,7 @@ import { writeTool, executeWrite } from './write.js';
 import { editTool, executeEdit } from './edit.js';
 import { globTool, executeGlob } from './glob.js';
 import { grepTool, executeGrep } from './grep.js';
+import { webTool, executeWebFetch } from './web.js';
 
 // Tool definitions for OpenAI API
 export const tools = [
@@ -12,7 +13,8 @@ export const tools = [
   writeTool,
   editTool,
   globTool,
-  grepTool
+  grepTool,
+  webTool
 ];
 
 // Tool executors
@@ -22,7 +24,8 @@ const executors = {
   write: executeWrite,
   edit: executeEdit,
   glob: executeGlob,
-  grep: executeGrep
+  grep: executeGrep,
+  web_fetch: executeWebFetch
 };
 
 export async function executeTool(name, args) {

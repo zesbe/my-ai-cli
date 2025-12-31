@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { tools, executeTool } from './tools/index.js';
+import fs from 'fs';
+import path from 'path';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
@@ -14,16 +16,54 @@ When the user asks you to perform tasks, use the appropriate tools.
 Always explain what you're doing before using tools.
 Be concise and helpful.`;
 
+// Load project context from ZESBE.md, CLAUDE.md, or GEMINI.md
+function loadProjectContext(cwd = process.cwd()) {
+  const contextFiles = ['ZESBE.md', 'CLAUDE.md', 'GEMINI.md', 'AI.md', '.ai/context.md'];
+  
+  for (const file of contextFiles) {
+    const filePath = path.join(cwd, file);
+    if (fs.existsSync(filePath)) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        return { file, content };
+      } catch (e) {
+        // Ignore read errors
+      }
+    }
+  }
+  return null;
+}
+
 export class Agent {
   constructor(options = {}) {
     this.provider = options.provider || 'openai';
     this.model = options.model || 'gpt-4o';
     this._apiKey = options.apiKey;
     this._baseUrl = options.baseUrl;
-    this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.yolo = options.yolo || false;
     this.stream = options.stream !== false;
     this.history = [];
+    this.cwd = options.cwd || process.cwd();
+    
+    // Stats tracking
+    this.stats = {
+      totalTokens: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      requests: 0,
+      toolCalls: 0,
+      startTime: Date.now()
+    };
+
+    // Load project context
+    this.projectContext = loadProjectContext(this.cwd);
+    
+    // Build system prompt with project context
+    let systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    if (this.projectContext) {
+      systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
+    }
+    this.systemPrompt = systemPrompt;
 
     // Initialize OpenAI client (works with any OpenAI-compatible API)
     this._initClient();

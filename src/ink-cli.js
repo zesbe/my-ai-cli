@@ -21,10 +21,11 @@ const SLASH_COMMANDS = [
   { value: '/providers', label: '/providers', description: '📋 List all providers with pricing' },
   { value: '/model', label: '/model', description: 'Switch AI model' },
   { value: '/provider', label: '/provider', description: 'Switch AI provider' },
-  { value: '/models', label: '/models', description: 'List models for current provider' },
   { value: '/apikey', label: '/apikey', description: '🔐 Set API key' },
   { value: '/free', label: '/free', description: '🆓 Show FREE providers' },
   { value: '/clear', label: '/clear', description: 'Clear conversation' },
+  { value: '/stats', label: '/stats', description: '📊 Session statistics' },
+  { value: '/context', label: '/context', description: '📄 Show project context' },
   { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve' },
   { value: '/config', label: '/config', description: 'Show configuration' },
   { value: '/exit', label: '/exit', description: 'Exit CLI' },
@@ -368,16 +369,27 @@ const ChatApp = ({ agent, initialPrompt }) => {
       case '/help':
         addMessage('system', `
 📚 COMMANDS:
-  /setup <provider>  Setup API key
-  /providers         List all providers
-  /free              Show FREE providers
-  /model             Change model
-  /provider          Change provider
-  /apikey <key>      Set API key
-  /clear             Clear chat
-  /yolo              Toggle auto-approve
-  /config            Show config
-  /exit              Exit
+
+🔌 PROVIDER:
+  /setup <name>    Setup API key with guide
+  /providers       List all providers  
+  /provider        Switch provider
+  /model           Switch model
+  /apikey <key>    Set API key
+  /free            Show FREE providers
+
+💬 CHAT:
+  /clear           Clear conversation
+  /yolo            Toggle auto-approve
+  /stats           Session statistics
+  /context         Show project context
+  /config          Show configuration
+
+🛠️ TOOLS (AI can use):
+  bash, read, write, edit, glob, grep, web_fetch
+
+📄 PROJECT CONTEXT:
+  Create ZESBE.md in project root for custom instructions
 
 ⌨️ SHORTCUTS:
   Ctrl+C  Exit
@@ -464,7 +476,36 @@ const ChatApp = ({ agent, initialPrompt }) => {
 Provider: ${PROVIDERS[agent.provider]?.name || agent.provider}
 Model: ${agent.model}
 YOLO: ${agent.yolo ? 'ON' : 'OFF'}
-Tokens: ${totalTokens}`);
+Tokens: ${totalTokens}
+Project Context: ${agent.projectContext ? agent.projectContext.file : 'None'}`);
+        break;
+
+      case '/stats':
+        const uptime = Math.floor((Date.now() - agent.stats.startTime) / 1000);
+        const mins = Math.floor(uptime / 60);
+        const secs = uptime % 60;
+        addMessage('system', `📊 SESSION STATS:
+├─ Requests: ${agent.stats.requests}
+├─ Tool Calls: ${agent.stats.toolCalls}
+├─ Total Tokens: ${agent.stats.totalTokens}
+├─ Uptime: ${mins}m ${secs}s
+├─ Provider: ${PROVIDERS[agent.provider]?.name}
+├─ Model: ${agent.model}
+└─ Project: ${agent.projectContext?.file || 'No context file'}`);
+        break;
+
+      case '/context':
+        if (agent.projectContext) {
+          addMessage('system', `📄 PROJECT CONTEXT (${agent.projectContext.file}):\n\n${agent.projectContext.content.substring(0, 500)}${agent.projectContext.content.length > 500 ? '...' : ''}`);
+        } else {
+          addMessage('system', `📄 No project context file found.
+
+Create one of these files in your project root:
+• ZESBE.md - Custom instructions for this CLI
+• CLAUDE.md - Compatible with Claude Code
+• GEMINI.md - Compatible with Gemini CLI
+• AI.md - Generic AI context`);
+        }
         break;
 
       case '/exit':
