@@ -529,6 +529,143 @@ const ModelMenu: React.FC<ModelMenuProps> = ({ provider, onSelect, onCancel, cur
   );
 };
 
+// MCP Browse Menu with SelectInput
+interface MCPBrowseMenuProps {
+  onSelect: (server: any) => void;
+  onCancel: () => void;
+}
+
+const MCPBrowseMenu: React.FC<MCPBrowseMenuProps> = ({ onSelect, onCancel }) => {
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  const servers = POPULAR_MCP_SERVERS.slice(0, 15);
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'green',
+    paddingX: 1
+  },
+    h(Text, { color: 'green', bold: true }, '🏪 Popular MCP Servers (Select to install):'),
+    h(SelectInput, {
+      items: servers.map(s => ({
+        label: s.name,
+        value: s.id,
+        server: s
+      })),
+      onSelect: (item: any) => onSelect(item.server),
+      itemComponent: ({ isSelected, label, server }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Box, null,
+            h(Text, {
+              color: isSelected ? 'green' : 'white',
+              bold: isSelected
+            }, `${isSelected ? '▸ ' : '  '}${server?.official ? '⭐ ' : ''}${label}`),
+            h(Text, { color: 'gray' }, ` by ${server?.author}`)
+          ),
+          h(Text, { color: 'gray', dimColor: true }, `    ${server?.description?.slice(0, 60) || ''}${server?.description?.length > 60 ? '...' : ''}`)
+        )
+    } as any)
+  );
+};
+
+// MCP Marketplace Menu with SelectInput
+interface MCPMarketplaceMenuProps {
+  onSelect: (marketplace: any) => void;
+  onCancel: () => void;
+}
+
+const MCPMarketplaceMenu: React.FC<MCPMarketplaceMenuProps> = ({ onSelect, onCancel }) => {
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'yellow',
+    paddingX: 1
+  },
+    h(Text, { color: 'yellow', bold: true }, '🏪 MCP Marketplaces (Select to open):'),
+    h(SelectInput, {
+      items: MARKETPLACE_LINKS.map(m => ({
+        label: `${m.icon} ${m.name}`,
+        value: m.url,
+        marketplace: m
+      })),
+      onSelect: (item: any) => onSelect(item.marketplace),
+      itemComponent: ({ isSelected, label, marketplace }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Text, {
+            color: isSelected ? 'yellow' : 'white',
+            bold: isSelected
+          }, `${isSelected ? '▸ ' : '  '}${label}`),
+          h(Text, { color: 'gray', dimColor: true }, `    ${marketplace?.description || ''}`)
+        )
+    } as any)
+  );
+};
+
+// Skills Menu with SelectInput
+interface SkillsMenuProps {
+  skills: any[];
+  loadedSkills: any[];
+  onSelect: (skill: any) => void;
+  onCancel: () => void;
+}
+
+const SkillsMenu: React.FC<SkillsMenuProps> = ({ skills, loadedSkills, onSelect, onCancel }) => {
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  if (skills.length === 0) {
+    return h(Box, {
+      flexDirection: 'column',
+      borderStyle: 'round',
+      borderColor: 'blue',
+      paddingX: 1
+    },
+      h(Text, { color: 'yellow' }, '📚 No skills found'),
+      h(Text, { color: 'gray' }, 'Create a skill with /skills create <name>')
+    );
+  }
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'blue',
+    paddingX: 1
+  },
+    h(Text, { color: 'blue', bold: true }, '📚 Skills (Select to load/unload):'),
+    h(SelectInput, {
+      items: skills.map(s => {
+        const isLoaded = loadedSkills.find(l => l.id === s.id);
+        return {
+          label: s.name || s.id,
+          value: s.id,
+          skill: s,
+          isLoaded: !!isLoaded
+        };
+      }),
+      onSelect: (item: any) => onSelect({ ...item.skill, isLoaded: item.isLoaded }),
+      itemComponent: ({ isSelected, label, skill, isLoaded }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Box, null,
+            h(Text, {
+              color: isSelected ? 'blue' : (isLoaded ? 'green' : 'white'),
+              bold: isSelected
+            }, `${isSelected ? '▸ ' : '  '}${isLoaded ? '✅ ' : '⬚ '}${label}`),
+            h(Text, { color: 'gray', dimColor: true }, ` (${skill?.source})`)
+          ),
+          h(Text, { color: 'gray', dimColor: true }, `    ${skill?.description || 'No description'}`)
+        )
+    } as any)
+  );
+};
+
 // Main App
 interface ChatAppProps {
   agent: AgentType;
@@ -548,6 +685,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showMCPBrowseMenu, setShowMCPBrowseMenu] = useState(false);
+  const [showMCPMarketplaceMenu, setShowMCPMarketplaceMenu] = useState(false);
+  const [showSkillsMenu, setShowSkillsMenu] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<any[]>([]);
+  const [loadedSkills, setLoadedSkills] = useState<any[]>([]);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCallData[]>([]);
@@ -599,6 +741,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       setShowSlashMenu(false);
       setShowProviderMenu(false);
       setShowModelMenu(false);
+      setShowMCPBrowseMenu(false);
+      setShowMCPMarketplaceMenu(false);
+      setShowSkillsMenu(false);
       completionCycler.current.reset();
     }
 
@@ -680,8 +825,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   }, []);
 
   useEffect(() => {
-    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu);
-  }, [query, showProviderMenu, showModelMenu]);
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu);
+  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu]);
 
   const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
     setMessages(prev => [...prev, {
@@ -1122,11 +1267,10 @@ description: What it does
 
 Instructions for AI...`);
           } else {
-            const list = available.map(s => {
-              const isLoaded = loaded.find(l => l.id === s.id);
-              return `${isLoaded ? '✅' : '⬚'} ${s.id} - ${s.description || s.name}\n   (${s.source})`;
-            }).join('\n');
-            addMessage('system', `📚 SKILLS:\n\n${list}\n\n/skills load <id> to load\n/skills unload <id> to unload`);
+            // Show interactive menu for skills
+            setAvailableSkills(available);
+            setLoadedSkills(loaded);
+            setShowSkillsMenu(true);
           }
         } else if (skillCmd === 'load' && skillArgs) {
           const result = skillsManager.loadSkill(skillArgs);
@@ -1231,10 +1375,8 @@ Then run: /mcp connect`);
             addMessage('system', `🔧 MCP TOOLS:\n\n${list}`);
           }
         } else if (mcpCmd === 'browse') {
-          const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s =>
-            `${s.official ? '⭐' : '•'} ${s.id} - ${s.name} by ${s.author}\n   ${s.description}\n   Category: ${s.category} | ⭐ ${s.stars} stars`
-          ).join('\n\n');
-          addMessage('system', `🏪 POPULAR MCP SERVERS (Curated List):\n\n${list}\n\n📦 QUICK INSTALL:\n  /mcp install playwright    # Browser automation\n  /mcp install github        # GitHub integration\n  /mcp install filesystem    # File operations\n\n🔍 MORE OPTIONS:\n  /mcp search <query>        # Search servers\n  /mcp marketplace           # External marketplaces`);
+          // Show interactive menu for MCP servers
+          setShowMCPBrowseMenu(true);
         } else if (mcpCmd === 'search') {
           if (!mcpArgs) {
             addMessage('system', 'Usage: /mcp search <query>\n\nExample: /mcp search database');
@@ -1275,10 +1417,8 @@ Then run: /mcp connect`);
             addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
           }
         } else if (mcpCmd === 'marketplace') {
-          const list = MARKETPLACE_LINKS.map(m =>
-            `${m.icon} ${m.name}\n   ${m.description}\n   ${m.url}`
-          ).join('\n\n');
-          addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!\n\n💡 To install servers from our curated list:\n  /mcp browse        # See popular servers\n  /mcp install <id>  # Install directly`);
+          // Show interactive menu for marketplaces
+          setShowMCPMarketplaceMenu(true);
         } else {
           addMessage('system', `🔌 MCP Commands:
   /mcp              List connected servers
@@ -1478,6 +1618,58 @@ Config file: ~/.zesbe/mcp.json`);
     addMessage('success', `Model: ${id}`);
   };
 
+  // Handler for MCP Browse menu selection
+  const handleMCPBrowseSelect = (server: any): void => {
+    setShowMCPBrowseMenu(false);
+    const mcpManager = getMCPManager();
+
+    // Check if requires path or token
+    if (server.install.requiresPath) {
+      addMessage('system', `📦 ${server.name}\n${server.description}\n\n⚠️ This server requires a PATH parameter.\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args).replace('{PATH}', '"/path/to/directory"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+    } else if (server.install.requiresToken) {
+      addMessage('system', `📦 ${server.name}\n${server.description}\n\n⚠️ This server requires: ${server.install.requiresToken}\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args)},\n      "env": ${JSON.stringify(server.install.env, null, 2).replace('{TOKEN}', '"your-token-here"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+    } else {
+      // Auto-install (no requirements)
+      const config = mcpManager.loadConfig();
+      config.mcpServers[server.id] = generateInstallConfig(server);
+      mcpManager.saveConfig(config);
+      addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
+    }
+  };
+
+  // Handler for MCP Marketplace menu selection
+  const handleMCPMarketplaceSelect = (marketplace: any): void => {
+    setShowMCPMarketplaceMenu(false);
+    addMessage('system', `🔗 ${marketplace.name}\n\n${marketplace.description}\n\n📎 URL: ${marketplace.url}\n\n💡 Open this URL in your browser to explore more MCP servers!`);
+  };
+
+  // Handler for Skills menu selection
+  const handleSkillsSelect = (skill: any): void => {
+    setShowSkillsMenu(false);
+    const skillsManager = getSkillsManager();
+
+    if (skill.isLoaded) {
+      // Unload skill
+      if (skillsManager.unloadSkill(skill.id)) {
+        agent.refreshSystemPrompt();
+        setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
+        addMessage('success', `Unloaded skill: ${skill.name || skill.id}`);
+      } else {
+        addMessage('error', `Failed to unload skill: ${skill.id}`);
+      }
+    } else {
+      // Load skill
+      const result = skillsManager.loadSkill(skill.id);
+      if (result.success) {
+        agent.refreshSystemPrompt();
+        setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
+        addMessage('success', `✅ Loaded skill: ${result.skill?.name}\n${result.skill?.description}\n\n💡 The AI can now use this skill! Try asking:\n"${result.skill?.name} help me with..."`);
+      } else {
+        addMessage('error', `Failed to load skill: ${result.error}`);
+      }
+    }
+  };
+
   // Render
   return h(Box, { flexDirection: 'column', padding: 1 },
     // Header
@@ -1537,6 +1729,20 @@ Config file: ~/.zesbe/mcp.json`);
       onSelect: handleModelSelect,
       onCancel: () => setShowModelMenu(false),
       current: agent.model
+    }),
+    showMCPBrowseMenu && h(MCPBrowseMenu, {
+      onSelect: handleMCPBrowseSelect,
+      onCancel: () => setShowMCPBrowseMenu(false)
+    }),
+    showMCPMarketplaceMenu && h(MCPMarketplaceMenu, {
+      onSelect: handleMCPMarketplaceSelect,
+      onCancel: () => setShowMCPMarketplaceMenu(false)
+    }),
+    showSkillsMenu && h(SkillsMenu, {
+      skills: availableSkills,
+      loadedSkills: loadedSkills,
+      onSelect: handleSkillsSelect,
+      onCancel: () => setShowSkillsMenu(false)
     }),
 
     // Input
