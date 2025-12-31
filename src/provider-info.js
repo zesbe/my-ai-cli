@@ -14,6 +14,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://platform.minimax.io/login',
     docsUrl: 'https://platform.minimax.io/docs/guides/quickstart',
     envVar: 'MINIMAX_API_KEY',
+    apiKeyFile: '.minimax_api_key',
     steps: [
       '1. Buka https://platform.minimax.io/login',
       '2. Daftar dengan email atau login',
@@ -38,6 +39,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://platform.openai.com/signup',
     docsUrl: 'https://platform.openai.com/docs',
     envVar: 'OPENAI_API_KEY',
+    apiKeyFile: '.openai_api_key',
     steps: [
       '1. Buka https://platform.openai.com/signup',
       '2. Daftar dengan Google/Microsoft/email',
@@ -63,6 +65,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://console.anthropic.com',
     docsUrl: 'https://docs.anthropic.com',
     envVar: 'ANTHROPIC_API_KEY',
+    apiKeyFile: '.anthropic_api_key',
     steps: [
       '1. Buka https://console.anthropic.com',
       '2. Sign up dengan email',
@@ -88,6 +91,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://aistudio.google.com',
     docsUrl: 'https://ai.google.dev/gemini-api/docs',
     envVar: 'GEMINI_API_KEY',
+    apiKeyFile: '.gemini_api_key',
     steps: [
       '1. Buka https://aistudio.google.com/app/apikey',
       '2. Login dengan akun Google',
@@ -112,6 +116,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://accounts.x.ai/sign-up',
     docsUrl: 'https://docs.x.ai/docs',
     envVar: 'XAI_API_KEY',
+    apiKeyFile: '.xai_api_key',
     steps: [
       '1. Buka https://console.x.ai',
       '2. Sign up / Login',
@@ -137,6 +142,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://platform.deepseek.com/sign_up',
     docsUrl: 'https://platform.deepseek.com/docs',
     envVar: 'DEEPSEEK_API_KEY',
+    apiKeyFile: '.deepseek_api_key',
     steps: [
       '1. Buka https://platform.deepseek.com/sign_up',
       '2. Daftar dengan email',
@@ -161,6 +167,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://console.groq.com',
     docsUrl: 'https://console.groq.com/docs',
     envVar: 'GROQ_API_KEY',
+    apiKeyFile: '.groq_api_key',
     steps: [
       '1. Buka https://console.groq.com',
       '2. Sign up dengan email/Google',
@@ -208,6 +215,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://z.ai/model-api',
     docsUrl: 'https://docs.z.ai',
     envVar: 'GLM_API_KEY',
+    apiKeyFile: '.glm_api_key',
     steps: [
       '1. Buka https://z.ai/model-api',
       '2. Register / Login',
@@ -232,6 +240,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://console.mistral.ai',
     docsUrl: 'https://docs.mistral.ai',
     envVar: 'MISTRAL_API_KEY',
+    apiKeyFile: '.mistral_api_key',
     steps: [
       '1. Buka https://console.mistral.ai',
       '2. Sign up dengan email',
@@ -255,6 +264,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://www.perplexity.ai',
     docsUrl: 'https://docs.perplexity.ai',
     envVar: 'PERPLEXITY_API_KEY',
+    apiKeyFile: '.perplexity_api_key',
     steps: [
       '1. Buka https://www.perplexity.ai',
       '2. Sign up / Login',
@@ -278,6 +288,7 @@ export const PROVIDER_INFO = {
     signupUrl: 'https://openrouter.ai',
     docsUrl: 'https://openrouter.ai/docs',
     envVar: 'OPENROUTER_API_KEY',
+    apiKeyFile: '.openrouter_api_key',
     steps: [
       '1. Buka https://openrouter.ai',
       '2. Sign in dengan Google/GitHub',
