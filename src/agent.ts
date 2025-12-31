@@ -584,8 +584,9 @@ export class Agent {
       system: this.systemPrompt,
       messages,
       tools,
-      // Only limit steps if maxSteps > 0, otherwise unlimited
-      ...(this.maxSteps > 0 ? { stopWhen: stepCountIs(this.maxSteps) } : {}),
+      // maxSteps = 0 means unlimited, use high number (1000)
+      // Default to 50 if not specified for safety
+      stopWhen: stepCountIs(this.maxSteps === 0 ? 1000 : this.maxSteps || 50),
       onStepFinish: ({ toolCalls }) => {
         // Track tool calls
         if (toolCalls && toolCalls.length > 0) {
@@ -652,8 +653,9 @@ export class Agent {
       system: this.systemPrompt,
       messages,
       tools,
-      // Only limit steps if maxSteps > 0, otherwise unlimited
-      ...(this.maxSteps > 0 ? { stopWhen: stepCountIs(this.maxSteps) } : {}),
+      // maxSteps = 0 means unlimited, use high number (1000)
+      // Default to 50 if not specified for safety
+      stopWhen: stepCountIs(this.maxSteps === 0 ? 1000 : this.maxSteps || 50),
       onStepFinish: ({ toolCalls }) => {
         if (toolCalls && toolCalls.length > 0) {
           this.stats.toolCalls += toolCalls.length;
