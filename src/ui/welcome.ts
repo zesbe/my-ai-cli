@@ -41,7 +41,6 @@ interface WelcomeOptions {
 
 // Create welcome box
 export function showWelcome(options: WelcomeOptions = {}): void {
-  const username = getUsername();
   const cwd = getCurrentDir();
   const model = options.model || 'gpt-4o';
   const provider = options.provider || 'openai';
@@ -50,47 +49,25 @@ export function showWelcome(options: WelcomeOptions = {}): void {
   const termWidth = process.stdout.columns || 80;
   const useCompact = termWidth < 60;
 
-  // Content
-  const content = [
-    '',
-    useCompact ? createCompactLogo() : createLogo(),
-    '',
-    chalk.white(`  Welcome back, ${chalk.cyan.bold(username)}!`),
-    '',
-    chalk.gray(`  🤖 Provider: ${chalk.white(provider)}`),
-    chalk.gray(`  📦 Model: ${chalk.white(model)}`),
-    chalk.gray(`  📁 ${cwd}`),
-    ''
-  ].join('\n');
+  // Clean ASCII style - no box
+  console.log('');
+  console.log(useCompact ? createCompactLogo() : createLogo());
+  console.log('');
 
-  // Create the box
-  const title = gradient.pastel(`─── Zesbe AI CLI v${VERSION} `);
-
-  const box = boxen(content, {
-    padding: { top: 0, bottom: 0, left: 1, right: 1 },
-    margin: 0,
-    borderStyle: 'round',
-    borderColor: 'cyan',
-    title: title,
-    titleAlignment: 'left'
-  });
-
-  console.log(box);
-
-  // Status line
-  if (options.yolo) {
-    console.log(chalk.yellow('\n  ⚡ YOLO mode enabled - auto-approving all actions\n'));
-  }
-
-  // Prompt hints
-  console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
-  console.log(chalk.gray('  💡 Type a message or use /help for commands'));
-  console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
+  // Single status line
+  const statusParts = [
+    chalk.cyan(provider),
+    chalk.white('•'),
+    chalk.magenta(model)
+  ];
 
   if (options.yolo) {
-    console.log(chalk.green('  ⚡ bypass permissions ON'));
+    statusParts.push(chalk.white('•'));
+    statusParts.push(chalk.yellow('⚡ YOLO'));
   }
 
+  console.log('  ' + statusParts.join(' '));
+  console.log(chalk.gray(`  📁 ${cwd}`));
   console.log('');
 }
 

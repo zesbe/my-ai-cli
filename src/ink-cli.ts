@@ -1009,25 +1009,9 @@ Config file: ~/.zesbe/mcp.json`);
     addMessage('success', `Model: ${id}`);
   };
 
-  // Render
+  // Render - Clean layout
   return h(Box, { flexDirection: 'column', padding: 1 },
-    // Header
-    h(Box, { marginBottom: 1 },
-      h(Text, { color: 'cyan', bold: true }, '╭─────────────────────────────────────────────────────────────╮'),
-    ),
-    h(Box, { marginBottom: 1, paddingX: 1 },
-      h(Text, { color: 'cyan', bold: true }, '│ '),
-      h(Text, { color: 'white', bold: true }, '🚀 My AI CLI'),
-      h(Text, { color: 'gray' }, ` • ${PROVIDERS[agent.provider]?.name || agent.provider}`),
-      h(Text, { color: 'magenta' }, ` • ${agent.model}`),
-      agent.yolo && h(Text, { color: 'yellow' }, ' ⚡'),
-      h(Text, { color: 'cyan', bold: true }, '                    │'),
-    ),
-    h(Box, { marginBottom: 1 },
-      h(Text, { color: 'cyan', bold: true }, '╰─────────────────────────────────────────────────────────────╯'),
-    ),
-
-    // Messages
+    // Messages (no header - welcome screen already shows info)
     h(Box, { flexDirection: 'column', marginBottom: 1 },
       ...messages.slice(-15).map((msg, i) =>
         h(Message, { key: `${i}-${msg.role}`, ...msg })
@@ -1067,9 +1051,8 @@ Config file: ~/.zesbe/mcp.json`);
       current: agent.model
     }),
 
-    // Input
+    // Input - Clean prompt
     h(Box, { flexDirection: 'column' },
-      h(Text, { color: 'gray' }, '─'.repeat(60)),
       h(Box, null,
         h(Text, { color: 'cyan', bold: true }, '❯ '),
         h(TextInput, {
@@ -1079,17 +1062,7 @@ Config file: ~/.zesbe/mcp.json`);
           placeholder: 'Type message or / for commands...'
         })
       )
-    ),
-
-    // Status Bar
-    h(StatusBar, {
-      provider: agent.provider,
-      model: agent.model,
-      tokens: totalTokens,
-      responseTime,
-      yolo: agent.yolo,
-      skillsCount: loadedSkillsCount
-    })
+    )
   );
 };
 
