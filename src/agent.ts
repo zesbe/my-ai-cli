@@ -3,8 +3,15 @@ import { getAllTools, executeTool } from './tools/index.js';
 import { getSkillsManager } from './skills/manager.js';
 import fs from 'fs';
 import path from 'path';
+import type {
+  AgentOptions,
+  AgentStats,
+  Message,
+  ChatCallbacks,
+  Session
+} from './types/index';
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
+const DEFAULT_SYSTEM_PROMPT = \`You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
 - bash: Execute shell commands
 - read: Read file contents
@@ -15,10 +22,10 @@ You have access to tools to help accomplish tasks:
 
 When the user asks you to perform tasks, use the appropriate tools.
 Always explain what you're doing before using tools.
-Be concise and helpful.`;
+Be concise and helpful.\`;
 
 // Load project context from ZESBE.md, CLAUDE.md, or GEMINI.md
-function loadProjectContext(cwd = process.cwd()) {
+function loadProjectContext(cwd: string = process.cwd()): { file: string; content: string } | null {
   const contextFiles = ['ZESBE.md', 'CLAUDE.md', 'GEMINI.md', 'AI.md', '.ai/context.md'];
   
   for (const file of contextFiles) {
@@ -38,19 +45,36 @@ function loadProjectContext(cwd = process.cwd()) {
 // Session storage directory
 const SESSION_DIR = path.join(process.env.HOME || '~', '.zesbe', 'sessions');
 
-function ensureSessionDir() {
+function ensureSessionDir(): void {
   if (!fs.existsSync(SESSION_DIR)) {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   }
 }
 
-function getSessionPath(name = 'last') {
+function getSessionPath(name: string = 'last'): string {
   ensureSessionDir();
-  return path.join(SESSION_DIR, `${name}.json`);
+  return path.join(SESSION_DIR, \`\${name}.json\`);
 }
 
 export class Agent {
-  constructor(options = {}) {
+  // Public properties
+  provider: string;
+  model: string;
+  yolo: boolean;
+  stream: boolean;
+  history: Message[];
+  cwd: string;
+  stats: AgentStats;
+  projectContext: { file: string; content: string } | null;
+  systemPrompt: string;
+  client: OpenAI;
+
+  // Private properties
+  private _apiKey?: string;
+  private _baseUrl?: string;
+  private _baseSystemPrompt: string;
+
+  constructor(options: AgentOptions = {}) {
     this.provider = options.provider || 'openai';
     this.model = options.model || 'gpt-4o';
     this._apiKey = options.apiKey;
@@ -76,20 +100,26 @@ export class Agent {
     // Store base system prompt
     this._baseSystemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     
+    // Initialize systemPrompt
+    this.systemPrompt = '';
+    
     // Build full system prompt
     this._buildSystemPrompt();
 
-    // Initialize OpenAI client (works with any OpenAI-compatible API)
-    this._initClient();
+    // Initialize OpenAI client
+    this.client = new OpenAI({
+      apiKey: this._apiKey,
+      baseURL: this._baseUrl
+    });
   }
 
   // Build system prompt with project context and skills
-  _buildSystemPrompt() {
+  private _buildSystemPrompt(): void {
     let systemPrompt = this._baseSystemPrompt;
     
     // Add project context
     if (this.projectContext) {
-      systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
+      systemPrompt += \`\\n\\n## Project Context (from \${this.projectContext.file}):\\n\${this.projectContext.content}\`;
     }
     
     // Add loaded skills
@@ -103,11 +133,11 @@ export class Agent {
   }
 
   // Refresh system prompt (call after loading/unloading skills)
-  refreshSystemPrompt() {
+  refreshSystemPrompt(): void {
     this._buildSystemPrompt();
   }
 
-  _initClient() {
+  private _initClient(): void {
     this.client = new OpenAI({
       apiKey: this._apiKey,
       baseURL: this._baseUrl
@@ -115,26 +145,32 @@ export class Agent {
   }
 
   // Getters and setters to reinitialize client when config changes
-  get apiKey() { return this._apiKey; }
-  set apiKey(value) {
+  get apiKey(): string | undefined {
+    return this._apiKey;
+  }
+
+  set apiKey(value: string | undefined) {
     this._apiKey = value;
     this._initClient();
   }
 
-  get baseUrl() { return this._baseUrl; }
-  set baseUrl(value) {
+  get baseUrl(): string | undefined {
+    return this._baseUrl;
+  }
+
+  set baseUrl(value: string | undefined) {
     this._baseUrl = value;
     this._initClient();
   }
 
-  clearHistory() {
+  clearHistory(): void {
     this.history = [];
   }
 
   // Save session to file
-  saveSession(name = 'last') {
+  saveSession(name: string = 'last'): { success: boolean; path?: string; error?: string } {
     const sessionPath = getSessionPath(name);
-    const session = {
+    const session: Session = {
       savedAt: new Date().toISOString(),
       cwd: this.cwd,
       provider: this.provider,
@@ -147,13 +183,13 @@ export class Agent {
     try {
       fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
       return { success: true, path: sessionPath };
-    } catch (e) {
-      return { success: false, error: e.message };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message };
     }
   }
 
   // Load session from file
-  loadSession(name = 'last') {
+  loadSession(name: string = 'last'): { success: boolean; savedAt?: string; summary?: string; messageCount?: number; error?: string } {
     const sessionPath = getSessionPath(name);
     
     if (!fs.existsSync(sessionPath)) {
@@ -161,7 +197,7 @@ export class Agent {
     }
     
     try {
-      const data = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(sessionPath, 'utf-8')) as Session;
       this.history = data.history || [];
       this.stats = { ...this.stats, ...data.stats };
       return { 
@@ -170,13 +206,13 @@ export class Agent {
         summary: data.summary,
         messageCount: this.history.length
       };
-    } catch (e) {
-      return { success: false, error: e.message };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message };
     }
   }
 
   // Generate conversation summary
-  generateSummary() {
+  generateSummary(): string {
     if (this.history.length === 0) return 'Empty session';
     
     const userMessages = this.history.filter(m => m.role === 'user');
@@ -188,7 +224,7 @@ export class Agent {
   }
 
   // List saved sessions
-  static listSessions() {
+  static listSessions(): Array<{ name: string; modified: Date; summary: string }> {
     ensureSessionDir();
     try {
       const files = fs.readdirSync(SESSION_DIR)
@@ -198,7 +234,7 @@ export class Agent {
           const stat = fs.statSync(filePath);
           let summary = '';
           try {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Session;
             summary = data.summary || '';
           } catch (e) {}
           return {
@@ -207,7 +243,7 @@ export class Agent {
             summary
           };
         })
-        .sort((a, b) => b.modified - a.modified);
+        .sort((a, b) => b.modified.getTime() - a.modified.getTime());
       return files;
     } catch (e) {
       return [];
@@ -215,21 +251,23 @@ export class Agent {
   }
 
   // Limit history to prevent token overflow
-  trimHistory(maxMessages = 20) {
+  trimHistory(maxMessages: number = 20): void {
     if (this.history.length > maxMessages) {
-      // Keep system context and recent messages
       this.history = this.history.slice(-maxMessages);
     }
   }
 
-  // Continue after tool calls without adding empty user message
-  async continueAfterTools(callbacks = {}) {
+  // Note: chat() and continueAfterTools() methods use 'any' for OpenAI response types
+  // as the OpenAI SDK types are complex. This is acceptable for now.
+  
+  async chat(userMessage: string, callbacks: ChatCallbacks = {}): Promise<void> {
     const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
 
+    this.history.push({ role: 'user', content: userMessage });
+    this.trimHistory();
+
     try {
-      this.trimHistory();
-      
-      const messages = [
+      const messages: Message[] = [
         { role: 'system', content: this.systemPrompt },
         ...this.history
       ];
@@ -238,17 +276,17 @@ export class Agent {
 
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages,
-        tools: getAllTools(),
+        messages: messages as any,
+        tools: getAllTools() as any,
         tool_choice: 'auto',
         stream: this.stream
       });
 
       let assistantMessage = '';
-      let toolCalls = [];
+      let toolCalls: any[] = [];
 
       if (this.stream) {
-        for await (const chunk of response) {
+        for await (const chunk of response as any) {
           const delta = chunk.choices[0]?.delta;
           if (delta?.content) {
             assistantMessage += delta.content;
@@ -259,7 +297,7 @@ export class Agent {
               if (tc.index !== undefined) {
                 if (!toolCalls[tc.index]) {
                   toolCalls[tc.index] = {
-                    id: tc.id || `call_${tc.index}`,
+                    id: tc.id || \`call_\${tc.index}\`,
                     type: 'function',
                     function: { name: '', arguments: '' }
                   };
@@ -272,22 +310,117 @@ export class Agent {
           }
         }
       } else {
-        const choice = response.choices[0];
+        const choice = (response as any).choices[0];
         assistantMessage = choice.message.content || '';
         toolCalls = choice.message.tool_calls || [];
         if (assistantMessage && onToken) onToken(assistantMessage);
       }
 
-      const historyEntry = { role: 'assistant', content: assistantMessage };
+      const historyEntry: any = { role: 'assistant', content: assistantMessage };
       if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
       this.history.push(historyEntry);
 
-      // Handle more tool calls
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
           if (!toolCall.function?.name) continue;
           const toolName = toolCall.function.name;
-          let toolArgs = {};
+          let toolArgs: Record<string, any> = {};
+          try { toolArgs = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) {}
+
+          let approved = true;
+          if (onToolCall) approved = await onToolCall(toolName, toolArgs);
+
+          if (approved) {
+            const result = await executeTool(toolName, toolArgs);
+            if (onToolResult) onToolResult(toolName, result);
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: typeof result === 'string' ? result : JSON.stringify(result)
+            });
+          } else {
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'Tool execution was rejected by user.'
+            });
+          }
+        }
+        await this.continueAfterTools(callbacks);
+        return;
+      }
+
+      if (onEnd) onEnd();
+    } catch (err) {
+      if (onError) onError(err as Error);
+      else throw err;
+    }
+  }
+
+  async continueAfterTools(callbacks: ChatCallbacks = {}): Promise<void> {
+    const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
+
+    try {
+      this.trimHistory();
+      
+      const messages: Message[] = [
+        { role: 'system', content: this.systemPrompt },
+        ...this.history
+      ];
+
+      if (onStart) onStart();
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: messages as any,
+        tools: getAllTools() as any,
+        tool_choice: 'auto',
+        stream: this.stream
+      });
+
+      let assistantMessage = '';
+      let toolCalls: any[] = [];
+
+      if (this.stream) {
+        for await (const chunk of response as any) {
+          const delta = chunk.choices[0]?.delta;
+          if (delta?.content) {
+            assistantMessage += delta.content;
+            if (onToken) onToken(delta.content);
+          }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.index !== undefined) {
+                if (!toolCalls[tc.index]) {
+                  toolCalls[tc.index] = {
+                    id: tc.id || \`call_\${tc.index}\`,
+                    type: 'function',
+                    function: { name: '', arguments: '' }
+                  };
+                }
+                if (tc.function?.name) toolCalls[tc.index].function.name = tc.function.name;
+                if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
+                if (tc.id) toolCalls[tc.index].id = tc.id;
+              }
+            }
+          }
+        }
+      } else {
+        const choice = (response as any).choices[0];
+        assistantMessage = choice.message.content || '';
+        toolCalls = choice.message.tool_calls || [];
+        if (assistantMessage && onToken) onToken(assistantMessage);
+      }
+
+      const historyEntry: any = { role: 'assistant', content: assistantMessage };
+      if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
+      this.history.push(historyEntry);
+
+      if (toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (!toolCall.function?.name) continue;
+          const toolName = toolCall.function.name;
+          let toolArgs: Record<string, any> = {};
           try { toolArgs = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) {}
 
           let approved = true;
@@ -315,157 +448,8 @@ export class Agent {
 
       if (onEnd) onEnd();
     } catch (err) {
-      if (onError) onError(err);
+      if (onError) onError(err as Error);
       else throw err;
-    }
-  }
-
-  async chat(userMessage, callbacks = {}) {
-    const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
-
-    // Add user message to history
-    this.history.push({
-      role: 'user',
-      content: userMessage
-    });
-
-    // Trim history to prevent token overflow
-    this.trimHistory();
-
-    try {
-      // Build messages array
-      const messages = [
-        { role: 'system', content: this.systemPrompt },
-        ...this.history
-      ];
-
-      if (onStart) onStart();
-
-      // Make API call with tools
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages,
-        tools: getAllTools(),
-        tool_choice: 'auto',
-        stream: this.stream
-      });
-
-      let assistantMessage = '';
-      let toolCalls = [];
-
-      if (this.stream) {
-        // Handle streaming response
-        for await (const chunk of response) {
-          const delta = chunk.choices[0]?.delta;
-
-          if (delta?.content) {
-            assistantMessage += delta.content;
-            if (onToken) onToken(delta.content);
-          }
-
-          if (delta?.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              if (tc.index !== undefined) {
-                if (!toolCalls[tc.index]) {
-                  toolCalls[tc.index] = {
-                    id: tc.id || `call_${tc.index}`,
-                    type: 'function',
-                    function: { name: '', arguments: '' }
-                  };
-                }
-                if (tc.function?.name) {
-                  toolCalls[tc.index].function.name = tc.function.name;
-                }
-                if (tc.function?.arguments) {
-                  toolCalls[tc.index].function.arguments += tc.function.arguments;
-                }
-                if (tc.id) {
-                  toolCalls[tc.index].id = tc.id;
-                }
-              }
-            }
-          }
-        }
-      } else {
-        // Handle non-streaming response
-        const choice = response.choices[0];
-        assistantMessage = choice.message.content || '';
-        toolCalls = choice.message.tool_calls || [];
-
-        if (assistantMessage && onToken) {
-          onToken(assistantMessage);
-        }
-      }
-
-      // Add assistant message to history
-      const historyEntry = {
-        role: 'assistant',
-        content: assistantMessage
-      };
-
-      if (toolCalls.length > 0) {
-        historyEntry.tool_calls = toolCalls;
-      }
-
-      this.history.push(historyEntry);
-
-      // Execute tool calls if any
-      if (toolCalls.length > 0) {
-        for (const toolCall of toolCalls) {
-          if (!toolCall.function?.name) continue;
-
-          const toolName = toolCall.function.name;
-          let toolArgs = {};
-
-          try {
-            toolArgs = JSON.parse(toolCall.function.arguments || '{}');
-          } catch (e) {
-            toolArgs = {};
-          }
-
-          // Ask for approval
-          let approved = true;
-          if (onToolCall) {
-            approved = await onToolCall(toolName, toolArgs);
-          }
-
-          if (approved) {
-            // Execute the tool
-            const result = await executeTool(toolName, toolArgs);
-
-            if (onToolResult) {
-              onToolResult(toolName, result);
-            }
-
-            // Add tool result to history
-            this.history.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: typeof result === 'string' ? result : JSON.stringify(result)
-            });
-          } else {
-            // Tool was rejected
-            this.history.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: 'Tool execution was rejected by user.'
-            });
-          }
-        }
-
-        // Continue conversation after tool execution
-        await this.continueAfterTools(callbacks);
-        return;
-      }
-
-      if (onEnd) onEnd();
-
-    } catch (err) {
-      if (onError) {
-        onError(err);
-      } else {
-        throw err;
-      }
     }
   }
 }
