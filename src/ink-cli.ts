@@ -75,8 +75,20 @@ class ChatCLI {
   private contextManager: ContextManager;
   private currentSpinner: Ora | null = null;
   private isProcessing = false;
+  private stdinClosed = false;
+  private originalStderr: typeof process.stderr.write;
 
   constructor(agent: AgentType) {
+    // Suppress verbose AI SDK error output (printed to stderr)
+    this.originalStderr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((...args: Parameters<typeof process.stderr.write>) => {
+      const msg = String(args[0]);
+      // Filter out verbose AI SDK errors - we handle these cleanly
+      if (msg.includes('RetryError') || msg.includes('AI_APICallError') || msg.includes('Symbol(vercel')) {
+        return true;
+      }
+      return this.originalStderr(...args);
+    }) as typeof process.stderr.write;
     this.agent = agent;
     this.contextManager = new ContextManager();
     this.state = {
@@ -95,8 +107,13 @@ class ChatCLI {
       terminal: true
     });
 
-    // Handle Ctrl+C
+    // Handle readline close - but NOT while processing
     this.rl.on('close', () => {
+      this.stdinClosed = true;
+      // If we're in the middle of processing, don't exit yet - let processing complete
+      if (this.isProcessing) {
+        return;
+      }
       this.cleanup();
       process.exit(0);
     });
@@ -119,6 +136,8 @@ class ChatCLI {
    * Cleanup before exit
    */
   private cleanup(): void {
+    // Restore original stderr
+    process.stderr.write = this.originalStderr;
     process.stdout.write(CURSOR_SHOW);
     console.log(chalk.cyan('\n👋 Goodbye!\n'));
     this.agent.saveSession('last');
@@ -142,6 +161,12 @@ class ChatCLI {
    * Print prompt
    */
   private prompt(): void {
+    // If stdin was closed while we were processing, exit gracefully now
+    if (this.stdinClosed) {
+      this.cleanup();
+      process.exit(0);
+    }
+
     this.rl.question(chalk.cyan('❯ '), async (input) => {
       await this.handleInput(input);
     });
@@ -438,12 +463,50 @@ class ChatCLI {
         },
         onError: (err: Error) => {
           this.currentSpinner?.fail('Error');
-          console.log(chalk.red(`\n❌ ${err.message}\n`));
+          const error = err as Error & { lastError?: { message?: string }; statusCode?: number };
+
+          // Extract meaningful error message
+          let errorMsg = err.message;
+          if (error.lastError?.message) {
+            errorMsg = error.lastError.message;
+          }
+
+          // Format based on error type
+          if (error.statusCode === 429 || errorMsg.includes('limit') || errorMsg.includes('429')) {
+            console.log(chalk.yellow(`\n⚠️ Rate limit: ${errorMsg}\n`));
+          } else if (error.statusCode === 401 || errorMsg.includes('api key') || errorMsg.includes('401')) {
+            console.log(chalk.red(`\n🔑 Auth error: ${errorMsg}\n`));
+            console.log(chalk.gray('  Use /apikey <key> to set API key'));
+          } else {
+            console.log(chalk.red(`\n❌ ${errorMsg}\n`));
+          }
         }
       });
     } catch (err) {
       this.currentSpinner?.fail('Error');
-      console.log(chalk.red(`\n❌ ${(err as Error).message}\n`));
+      const error = err as Error & { cause?: { message?: string }; statusCode?: number; lastError?: { message?: string } };
+
+      // Extract the most meaningful error message
+      let errorMsg = error.message;
+
+      // For AI SDK RetryError, extract the last error message
+      if (error.lastError?.message) {
+        errorMsg = error.lastError.message;
+      }
+      // For nested errors with cause
+      if (error.cause?.message) {
+        errorMsg = error.cause.message;
+      }
+
+      // Format rate limit errors nicely
+      if (error.statusCode === 429 || errorMsg.includes('limit') || errorMsg.includes('429')) {
+        console.log(chalk.yellow(`\n⚠️ Rate limit: ${errorMsg}\n`));
+      } else if (error.statusCode === 401 || errorMsg.includes('api key') || errorMsg.includes('401')) {
+        console.log(chalk.red(`\n🔑 Auth error: ${errorMsg}\n`));
+        console.log(chalk.gray('  Use /apikey <key> to set API key'));
+      } else {
+        console.log(chalk.red(`\n❌ Error: ${errorMsg}\n`));
+      }
     }
 
     this.isProcessing = false;

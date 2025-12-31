@@ -577,6 +577,7 @@ export class Agent {
     const { onStart, onToken } = callbacks;
 
     let fullResponse = '';
+    let streamError: Error | null = null;
 
     const result = streamText({
       model,
@@ -595,10 +596,32 @@ export class Agent {
     // Signal start
     if (onStart) onStart();
 
-    // Stream tokens
+    // Stream tokens - AI SDK doesn't throw, just completes silently on error
     for await (const chunk of result.textStream) {
       fullResponse += chunk;
       if (onToken) onToken(chunk);
+    }
+
+    // Check for errors - AI SDK stream may complete without throwing
+    try {
+      // Access internal state to check for errors
+      const resultAny = result as unknown as { _steps?: { status?: { type: string; error?: Error } } };
+      if (resultAny._steps?.status?.type === 'rejected' && resultAny._steps.status.error) {
+        streamError = resultAny._steps.status.error;
+      } else if (!fullResponse) {
+        // No response generated - likely an error occurred
+        const finishReason = await result.finishReason;
+        if (finishReason !== 'stop') {
+          streamError = new Error(`No response generated (${finishReason || 'unknown'})`);
+        }
+      }
+    } catch (e) {
+      streamError = e as Error;
+    }
+
+    // Throw if there was an error
+    if (streamError) {
+      throw streamError;
     }
 
     // Update stats
