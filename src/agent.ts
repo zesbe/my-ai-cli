@@ -19,7 +19,7 @@ import type { AgentOptions, AgentStats, Message, ChatCallbacks, Session, ToolCal
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DEFAULT_MAX_STEPS = 15;
+const DEFAULT_MAX_STEPS = 50; // Increased from 15 to allow more file operations
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
