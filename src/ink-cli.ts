@@ -2046,19 +2046,24 @@ Config file: ~/.zesbe/mcp.json`);
 
   // Handler for MCP Main menu selection
   const handleMCPMainSelect = (action: string): void => {
+    // Prevent double-trigger
+    if (!showMCPMainMenu) return;
     setShowMCPMainMenu(false);
+
     const mcpManager = getMCPManager();
 
     switch (action) {
       case 'list': {
         const servers = mcpManager.listServers();
         if (servers.length === 0) {
-          addMessage('system', `🔌 MCP: No servers connected.\n\nTo configure MCP servers, edit:\n~/.zesbe/mcp.json\n\nThen run /mcp connect`);
+          addMessage('system', `🔌 MCP: No servers connected.\n\n💡 Use /mcp browse to install popular servers\n   or edit ~/.zesbe/mcp.json manually`);
+          // Auto-show browse menu after short delay
+          setTimeout(() => setShowMCPBrowseMenu(true), 500);
         } else {
           const list = servers.map(s =>
             `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
           ).join('\n');
-          addMessage('system', `🔌 MCP SERVERS:\n\n${list}`);
+          addMessage('system', `🔌 MCP SERVERS (${servers.length}):\n\n${list}`);
         }
         break;
       }
@@ -2066,17 +2071,22 @@ Config file: ~/.zesbe/mcp.json`);
       case 'connect': {
         addMessage('system', '🔌 Connecting to MCP servers...');
         mcpManager.connectAll().then(results => {
-          const summary = results.map(r =>
-            r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
-          ).join('\n');
-          addMessage('system', `MCP Connection Results:\n${summary || 'No servers configured'}`);
+          if (results.length === 0) {
+            addMessage('system', '⚠️ No servers configured.\n\n💡 Use /mcp browse to add servers first');
+            setTimeout(() => setShowMCPBrowseMenu(true), 500);
+          } else {
+            const summary = results.map(r =>
+              r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
+            ).join('\n');
+            addMessage('system', `MCP Connection Results:\n${summary}`);
+          }
         });
         break;
       }
 
       case 'disconnect': {
         mcpManager.disconnectAll().then(() => {
-          addMessage('success', 'Disconnected from all MCP servers');
+          addMessage('success', '✅ Disconnected from all MCP servers');
         });
         break;
       }
@@ -2084,7 +2094,7 @@ Config file: ~/.zesbe/mcp.json`);
       case 'tools': {
         const tools = mcpManager.getToolsForAI();
         if (tools.length === 0) {
-          addMessage('system', '🔧 No MCP tools available.\n\nRun /mcp connect first to connect to configured servers.');
+          addMessage('system', '🔧 No MCP tools available.\n\n💡 Run /mcp connect first to connect to servers');
         } else {
           const toolList = tools.map(t => `• ${t.function.name}`).join('\n');
           addMessage('system', `🔧 MCP TOOLS (${tools.length}):\n\n${toolList}`);
