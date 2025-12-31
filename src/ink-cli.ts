@@ -574,6 +574,56 @@ const ModelMenu: React.FC<ModelMenuProps> = ({ provider, onSelect, onCancel, cur
   );
 };
 
+// MCP Main Menu - Like OpenCode's MCP management
+interface MCPMainMenuProps {
+  onSelect: (action: string) => void;
+  onCancel: () => void;
+  connectedCount: number;
+  toolsCount: number;
+}
+
+const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connectedCount, toolsCount }) => {
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  const items = [
+    { label: '📋 List servers', value: 'list', desc: `View connected servers (${connectedCount} active)` },
+    { label: '🔌 Connect all', value: 'connect', desc: 'Connect to all configured MCP servers' },
+    { label: '⚡ Disconnect all', value: 'disconnect', desc: 'Disconnect from all servers' },
+    { label: '🔧 View tools', value: 'tools', desc: `List available MCP tools (${toolsCount} tools)` },
+    { label: '🏪 Browse servers', value: 'browse', desc: 'Browse popular MCP servers to install' },
+    { label: '🔍 Search servers', value: 'search', desc: 'Search for MCP servers by name' },
+    { label: '🛒 Marketplace', value: 'marketplace', desc: 'Open online MCP marketplaces' },
+    { label: '⚙️ Edit config', value: 'config', desc: 'Show config file location' },
+  ];
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'cyan',
+    paddingX: 1
+  },
+    h(Text, { color: 'cyan', bold: true }, '🔌 MCP Server Management:'),
+    h(SelectInput, {
+      items: items.map(i => ({
+        label: i.label,
+        value: i.value,
+        desc: i.desc
+      })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, desc }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Text, {
+            color: isSelected ? 'cyan' : 'white',
+            bold: isSelected
+          }, `${isSelected ? '▸ ' : '  '}${label}`),
+          h(Text, { color: 'gray', dimColor: true }, `    ${desc}`)
+        )
+    } as any)
+  );
+};
+
 // MCP Browse Menu with SelectInput
 interface MCPBrowseMenuProps {
   onSelect: (server: any) => void;
@@ -1008,6 +1058,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showMCPMainMenu, setShowMCPMainMenu] = useState(false);
   const [showMCPBrowseMenu, setShowMCPBrowseMenu] = useState(false);
   const [showMCPMarketplaceMenu, setShowMCPMarketplaceMenu] = useState(false);
   const [showSkillsMenu, setShowSkillsMenu] = useState(false);
@@ -1068,6 +1119,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
       setShowSlashMenu(false);
       setShowProviderMenu(false);
       setShowModelMenu(false);
+      setShowMCPMainMenu(false);
       setShowMCPBrowseMenu(false);
       setShowMCPMarketplaceMenu(false);
       setShowSkillsMenu(false);
@@ -1155,8 +1207,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   }, []);
 
   useEffect(() => {
-    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showYoloMenu && !showAuthDialog && !showApiKeyDialog);
-  }, [query, showProviderMenu, showModelMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showYoloMenu, showAuthDialog, showApiKeyDialog]);
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu && !showMCPMainMenu && !showMCPBrowseMenu && !showMCPMarketplaceMenu && !showSkillsMenu && !showYoloMenu && !showAuthDialog && !showApiKeyDialog);
+  }, [query, showProviderMenu, showModelMenu, showMCPMainMenu, showMCPBrowseMenu, showMCPMarketplaceMenu, showSkillsMenu, showYoloMenu, showAuthDialog, showApiKeyDialog]);
 
   const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
     setMessages(prev => [...prev, {
@@ -1670,7 +1722,13 @@ Skills directories:
         const mcpCmd = args.split(' ')[0];
         const mcpArgs = args.split(' ').slice(1).join(' ');
 
-        if (mcpCmd === 'list' || !mcpCmd) {
+        // Show interactive menu when no subcommand given
+        if (!mcpCmd) {
+          setShowMCPMainMenu(true);
+          break;
+        }
+
+        if (mcpCmd === 'list') {
           const servers = mcpManager.listServers();
           if (servers.length === 0) {
             addMessage('system', `🔌 MCP: No servers connected.
@@ -1964,6 +2022,67 @@ Config file: ~/.zesbe/mcp.json`);
     addMessage('success', `⚡ YOLO Mode: ${value ? 'ON - Auto-approve enabled' : 'OFF - Safe mode'}`);
   };
 
+  // Handler for MCP Main menu selection
+  const handleMCPMainSelect = async (action: string): Promise<void> => {
+    setShowMCPMainMenu(false);
+    const mcpManager = getMCPManager();
+
+    switch (action) {
+      case 'list':
+        const servers = mcpManager.listServers();
+        if (servers.length === 0) {
+          addMessage('system', `🔌 MCP: No servers connected.\n\nTo configure MCP servers, edit:\n~/.zesbe/mcp.json\n\nThen run /mcp connect`);
+        } else {
+          const list = servers.map(s =>
+            `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
+          ).join('\n');
+          addMessage('system', `🔌 MCP SERVERS:\n\n${list}`);
+        }
+        break;
+
+      case 'connect':
+        addMessage('system', '🔌 Connecting to MCP servers...');
+        const results = await mcpManager.connectAll();
+        const summary = results.map(r =>
+          r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
+        ).join('\n');
+        addMessage('system', `MCP Connection Results:\n${summary || 'No servers configured'}`);
+        break;
+
+      case 'disconnect':
+        await mcpManager.disconnectAll();
+        addMessage('success', 'Disconnected from all MCP servers');
+        break;
+
+      case 'tools':
+        const tools = mcpManager.getToolsForAI();
+        if (tools.length === 0) {
+          addMessage('system', 'No MCP tools available. Run /mcp connect first.');
+        } else {
+          const toolList = tools.map(t => `• ${t.function.name}`).join('\n');
+          addMessage('system', `🔧 MCP TOOLS:\n\n${toolList}`);
+        }
+        break;
+
+      case 'browse':
+        setShowMCPBrowseMenu(true);
+        break;
+
+      case 'search':
+        addMessage('system', 'Usage: /mcp search <query>\n\nExample: /mcp search database');
+        break;
+
+      case 'marketplace':
+        setShowMCPMarketplaceMenu(true);
+        break;
+
+      case 'config':
+        const configPath = path.join(os.homedir(), '.zesbe', 'mcp.json');
+        addMessage('system', `⚙️ MCP Config File:\n${configPath}\n\nEdit this file to add/remove MCP servers.`);
+        break;
+    }
+  };
+
   // Handler for MCP Browse menu selection
   const handleMCPBrowseSelect = (server: any): void => {
     setShowMCPBrowseMenu(false);
@@ -2145,6 +2264,12 @@ Config file: ~/.zesbe/mcp.json`);
       onSelect: handleYoloSelect,
       onCancel: () => setShowYoloMenu(false),
       current: agent.yolo
+    }),
+    showMCPMainMenu && h(MCPMainMenu, {
+      onSelect: handleMCPMainSelect,
+      onCancel: () => setShowMCPMainMenu(false),
+      connectedCount: getMCPManager().listServers().length,
+      toolsCount: getMCPManager().getToolsForAI().length
     }),
 
     // API Key Dialog (popup modal)
