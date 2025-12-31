@@ -55,15 +55,40 @@ interface ChatState {
   historyIndex: number;
 }
 
-// All supported commands for partial matching
-const ALL_COMMANDS = [
-  '/help', '/setup', '/providers', '/provider', '/model', '/apikey', '/free',
-  '/clear', '/yolo', '/stats', '/context', '/config',
-  '/save', '/load', '/resume', '/sessions',
-  '/attach', '/detach', '/files', '/preview', '/diff',
-  '/export', '/history', '/copy', '/paste', '/shortcuts',
-  '/mcp', '/skills', '/exit'
+// All supported commands with descriptions for suggestions
+const COMMAND_LIST = [
+  { cmd: '/help', desc: 'Show all commands', cat: '💬' },
+  { cmd: '/setup', desc: 'Setup provider API key', cat: '🔌' },
+  { cmd: '/providers', desc: 'List all providers', cat: '🔌' },
+  { cmd: '/provider', desc: 'Switch provider', cat: '🔌' },
+  { cmd: '/model', desc: 'Switch model', cat: '🔌' },
+  { cmd: '/apikey', desc: 'Set API key', cat: '🔌' },
+  { cmd: '/free', desc: 'Show FREE providers', cat: '🔌' },
+  { cmd: '/clear', desc: 'Clear conversation', cat: '💬' },
+  { cmd: '/yolo', desc: 'Toggle auto-approve', cat: '💬' },
+  { cmd: '/stats', desc: 'Session statistics', cat: '💬' },
+  { cmd: '/context', desc: 'Show project context', cat: '💬' },
+  { cmd: '/config', desc: 'Show configuration', cat: '💬' },
+  { cmd: '/save', desc: 'Save session', cat: '💾' },
+  { cmd: '/load', desc: 'Load session', cat: '💾' },
+  { cmd: '/resume', desc: 'Resume last session', cat: '💾' },
+  { cmd: '/sessions', desc: 'List saved sessions', cat: '💾' },
+  { cmd: '/attach', desc: 'Attach file to context', cat: '📎' },
+  { cmd: '/detach', desc: 'Remove file from context', cat: '📎' },
+  { cmd: '/files', desc: 'List attached files', cat: '📎' },
+  { cmd: '/preview', desc: 'Preview file content', cat: '📎' },
+  { cmd: '/diff', desc: 'Show diff between files', cat: '📎' },
+  { cmd: '/export', desc: 'Export chat history', cat: '📤' },
+  { cmd: '/history', desc: 'Search conversation history', cat: '📤' },
+  { cmd: '/copy', desc: 'Copy last response', cat: '📤' },
+  { cmd: '/paste', desc: 'Paste from clipboard', cat: '📤' },
+  { cmd: '/shortcuts', desc: 'Show keyboard shortcuts', cat: '📤' },
+  { cmd: '/mcp', desc: 'MCP server management', cat: '🔌' },
+  { cmd: '/skills', desc: 'Skills management', cat: '📚' },
+  { cmd: '/exit', desc: 'Exit the CLI', cat: '🚪' },
 ];
+
+const ALL_COMMANDS = COMMAND_LIST.map(c => c.cmd);
 
 /**
  * Main CLI Class
@@ -163,12 +188,16 @@ class ChatCLI {
    */
   private printHeader(): void {
     const providerName = PROVIDERS[this.agent.provider]?.name || this.agent.provider;
+    const yoloIndicator = this.agent.yolo ? chalk.yellow(' ⚡ YOLO') : '';
+
     console.log('');
-    console.log(chalk.cyan('╭─────────────────────────────────────────────────────────────╮'));
-    console.log(chalk.cyan('│ ') + chalk.white.bold('🚀 My AI CLI') + chalk.gray(` • ${providerName} • ${this.agent.model}`) +
-      (this.agent.yolo ? chalk.yellow(' ⚡') : '') + chalk.cyan('                    │'));
-    console.log(chalk.cyan('╰─────────────────────────────────────────────────────────────╯'));
-    console.log(chalk.gray('Type /help for commands, /exit to quit'));
+    console.log(chalk.cyan.bold('╭────────────────────────────────────────────────────────────╮'));
+    console.log(chalk.cyan.bold('│') + chalk.white.bold('  🚀 ZESBE AI CLI                                          ') + chalk.cyan.bold('│'));
+    console.log(chalk.cyan.bold('├────────────────────────────────────────────────────────────┤'));
+    console.log(chalk.cyan.bold('│') + chalk.gray(`  Provider: ${providerName.padEnd(20)}Model: ${this.agent.model.substring(0, 15).padEnd(15)}`) + yoloIndicator.padEnd(7) + chalk.cyan.bold('│'));
+    console.log(chalk.cyan.bold('╰────────────────────────────────────────────────────────────╯'));
+    console.log('');
+    console.log(chalk.gray('  💡 Type ') + chalk.cyan('/') + chalk.gray(' to see commands • ') + chalk.cyan('/help') + chalk.gray(' for full guide • ') + chalk.cyan('/exit') + chalk.gray(' to quit'));
     console.log('');
   }
 
@@ -182,16 +211,20 @@ class ChatCLI {
       process.exit(0);
     }
 
+    // Show prompt with hint
+    const hint = chalk.gray(' (/ for commands)');
+    const promptStr = chalk.cyan.bold('❯ ');
+
     if (this.isInteractive) {
       // Interactive mode: use question() for prompt
-      this.rl.question(chalk.cyan('❯ '), async (input) => {
+      this.rl.question(promptStr, async (input) => {
         await this.handleInput(input);
       });
     } else {
       // Piped mode: process from queue
       if (this.inputQueue.length > 0) {
         const input = this.inputQueue.shift()!;
-        process.stdout.write(chalk.cyan('❯ ') + input + '\n');
+        process.stdout.write(promptStr + input + '\n');
         this.handleInput(input).then(() => {
           // Continue processing queue
         });
@@ -243,10 +276,55 @@ class ChatCLI {
   }
 
   /**
+   * Show command suggestions
+   */
+  private showCommandSuggestions(filter?: string): void {
+    const filtered = filter
+      ? COMMAND_LIST.filter(c => c.cmd.startsWith(filter.toLowerCase()))
+      : COMMAND_LIST;
+
+    if (filtered.length === 0) {
+      console.log(chalk.red(`❌ No commands match: ${filter}`));
+      console.log(chalk.gray('Type /help to see all commands'));
+      return;
+    }
+
+    // Group by category
+    const categories = new Map<string, typeof COMMAND_LIST>();
+    filtered.forEach(c => {
+      const list = categories.get(c.cat) || [];
+      list.push(c);
+      categories.set(c.cat, list);
+    });
+
+    console.log('');
+    console.log(chalk.cyan.bold('╭─────────────────────────────────────────╮'));
+    console.log(chalk.cyan.bold('│') + chalk.white.bold('           📋 COMMANDS                   ') + chalk.cyan.bold('│'));
+    console.log(chalk.cyan.bold('├─────────────────────────────────────────┤'));
+
+    categories.forEach((cmds, cat) => {
+      cmds.forEach(c => {
+        const cmdPad = c.cmd.padEnd(14);
+        console.log(chalk.cyan.bold('│') + ` ${cat} ${chalk.green(cmdPad)} ${chalk.gray(c.desc.substring(0, 20).padEnd(20))} ` + chalk.cyan.bold('│'));
+      });
+    });
+
+    console.log(chalk.cyan.bold('╰─────────────────────────────────────────╯'));
+    console.log(chalk.gray('  Type command or partial (e.g., /pro → /providers)'));
+    console.log('');
+  }
+
+  /**
    * Partial command matching
    */
   private matchCommand(input: string): string | null {
     const cmd = input.toLowerCase();
+
+    // Just "/" - show suggestions
+    if (cmd === '/') {
+      this.showCommandSuggestions();
+      return null;
+    }
 
     // Exact match
     if (ALL_COMMANDS.includes(cmd)) {
@@ -256,10 +334,10 @@ class ChatCLI {
     // Prefix match
     const matches = ALL_COMMANDS.filter(c => c.startsWith(cmd));
     if (matches.length === 1) {
+      console.log(chalk.gray(`  → ${matches[0]}`)); // Show expanded command
       return matches[0];
     } else if (matches.length > 1) {
-      console.log(chalk.yellow(`Ambiguous command: ${input}`));
-      console.log(chalk.gray(`Did you mean: ${matches.join(', ')}`));
+      this.showCommandSuggestions(cmd);
       return null;
     }
 
@@ -432,22 +510,69 @@ class ChatCLI {
   }
 
   /**
+   * Output token with proper formatting for box
+   */
+  private outputToken(token: string): void {
+    // Handle newlines in response to maintain box formatting
+    if (token.includes('\n')) {
+      const parts = token.split('\n');
+      parts.forEach((part, i) => {
+        process.stdout.write(part);
+        if (i < parts.length - 1) {
+          process.stdout.write('\n' + chalk.green.bold('│') + ' ');
+        }
+      });
+    } else {
+      process.stdout.write(token);
+    }
+  }
+
+  /**
+   * Format user message box
+   */
+  private formatUserMessage(message: string): void {
+    const maxWidth = Math.min(process.stdout.columns || 60, 60);
+    const lines = message.split('\n');
+    const wrapped: string[] = [];
+
+    // Wrap long lines
+    lines.forEach(line => {
+      while (line.length > maxWidth - 4) {
+        wrapped.push(line.substring(0, maxWidth - 4));
+        line = line.substring(maxWidth - 4);
+      }
+      wrapped.push(line);
+    });
+
+    console.log('');
+    console.log(chalk.blue.bold('╭─ 👤 You ─────────────────────────────────────────────────╮'));
+    wrapped.forEach(line => {
+      const padded = line.padEnd(maxWidth - 4);
+      console.log(chalk.blue.bold('│') + chalk.white(` ${padded} `) + chalk.blue.bold('│'));
+    });
+    console.log(chalk.blue.bold('╰──────────────────────────────────────────────────────────╯'));
+    console.log('');
+  }
+
+  /**
    * Chat with AI
    */
   private async chat(message: string): Promise<void> {
     this.isProcessing = true;
 
-    // Print user message
-    console.log(chalk.cyan.bold('┌─ You'));
-    console.log(chalk.white(`  ${message}`));
-    console.log('');
+    // Print user message in a nice box
+    this.formatUserMessage(message);
 
     // Add to state
     this.state.messages.push({ role: 'user', content: message });
 
-    // Start spinner
+    // Start thinking indicator with custom spinner
     this.currentSpinner = ora({
-      text: 'Thinking...',
+      text: chalk.yellow('🧠 Thinking...'),
+      spinner: {
+        interval: 120,
+        frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+      },
       color: 'yellow'
     }).start();
 
@@ -455,41 +580,82 @@ class ChatCLI {
       let fullResponse = '';
       let tokens = 0;
       let isFirstChunk = true;
+      let responseStarted = false;
+      let inThinkBlock = false;
+      let thinkBuffer = '';
 
       await this.agent.chat(message, {
         onStart: () => {
           this.currentSpinner?.stop();
-          console.log(chalk.green.bold('┌─ Assistant'));
-          process.stdout.write('  ');
+          responseStarted = true;
+          console.log(chalk.green.bold('╭─ 🤖 Assistant ──────────────────────────────────────────╮'));
+          process.stdout.write(chalk.green.bold('│') + ' ');
         },
         onToken: (token: string) => {
-          if (!token.includes('<think>') && !token.includes('</think>')) {
-            fullResponse += token;
-            tokens++;
-            // Direct write - NO FLICKER!
-            process.stdout.write(token);
+          // Track think block state
+          thinkBuffer += token;
+
+          // Check for think tags in accumulated buffer
+          if (thinkBuffer.includes('<think>')) {
+            inThinkBlock = true;
+            thinkBuffer = thinkBuffer.split('<think>').pop() || '';
           }
+
+          if (thinkBuffer.includes('</think>')) {
+            inThinkBlock = false;
+            const afterThink = thinkBuffer.split('</think>').pop() || '';
+            thinkBuffer = afterThink;
+            // Output the part after </think> if any
+            if (afterThink) {
+              fullResponse += afterThink;
+              tokens++;
+              this.outputToken(afterThink);
+            }
+            return;
+          }
+
+          // Skip if inside think block
+          if (inThinkBlock) {
+            return;
+          }
+
+          // Skip raw think tags
+          if (token.includes('<think>') || token.includes('</think>')) {
+            return;
+          }
+
+          fullResponse += token;
+          tokens++;
+          this.outputToken(token);
         },
         onToolCall: async (tool: string, args: Record<string, unknown>) => {
-          // Show tool call on new line
-          if (fullResponse) {
-            process.stdout.write('\n');
+          // Show tool call on new line with nice indicator
+          if (responseStarted) {
+            process.stdout.write('\n' + chalk.green.bold('│') + '\n');
           }
           const icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
-          const argsStr = JSON.stringify(args).substring(0, 60);
+          const argsStr = JSON.stringify(args).substring(0, 50);
           this.currentSpinner = ora({
-            text: `${icon} ${chalk.cyan(tool)}(${chalk.gray(argsStr)}...)`,
-            color: 'yellow'
+            text: `${icon} ${chalk.cyan.bold(tool)}${chalk.gray('(' + argsStr + '...)')}`,
+            spinner: 'dots',
+            color: 'cyan'
           }).start();
           return true;
         },
         onToolResult: (tool: string, result: unknown) => {
-          this.currentSpinner?.succeed(`${chalk.cyan(tool)} completed`);
+          const icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
+          this.currentSpinner?.succeed(`${icon} ${chalk.cyan(tool)} ${chalk.green('✓')}`);
           this.currentSpinner = null;
-          process.stdout.write('  '); // Resume response indentation
+          if (responseStarted) {
+            console.log(chalk.green.bold('│'));
+            process.stdout.write(chalk.green.bold('│') + ' ');
+          }
         },
         onEnd: () => {
-          console.log('\n');
+          if (responseStarted) {
+            console.log('');
+            console.log(chalk.green.bold('╰──────────────────────────────────────────────────────────╯'));
+          }
           this.state.totalTokens += tokens;
           this.state.lastResponse = fullResponse;
 
@@ -497,8 +663,8 @@ class ChatCLI {
             this.state.messages.push({ role: 'assistant', content: fullResponse, tokens });
           }
 
-          // Show stats
-          console.log(chalk.gray(`  ─ ${tokens} tokens`));
+          // Show stats in a nice format
+          console.log(chalk.gray(`  📊 ${tokens} tokens • ${this.agent.model}`));
           console.log('');
         },
         onError: (err: Error) => {
