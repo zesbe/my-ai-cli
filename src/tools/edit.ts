@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { Tool } from '../types/index.js';
 
-export const editTool = {
+export const editTool: Tool = {
   type: 'function',
   function: {
     name: 'edit',
@@ -31,7 +32,22 @@ export const editTool = {
   }
 };
 
-export async function executeEdit(args) {
+interface EditArgs {
+  file_path: string;
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+}
+
+interface NodeError extends Error {
+  code?: string;
+}
+
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export async function executeEdit(args: EditArgs): Promise<string> {
   const { file_path, old_string, new_string, replace_all = false } = args;
 
   try {
@@ -59,13 +75,10 @@ export async function executeEdit(args) {
     const replaced = replace_all ? occurrences : 1;
     return `File edited: ${file_path} (${replaced} replacement${replaced > 1 ? 's' : ''})`;
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    const error = err as NodeError;
+    if (error.code === 'ENOENT') {
       return `File not found: ${file_path}`;
     }
-    return `Error editing file: ${err.message}`;
+    return `Error editing file: ${error.message}`;
   }
-}
-
-function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { Tool } from '../types/index.js';
 
-export const writeTool = {
+export const writeTool: Tool = {
   type: 'function',
   function: {
     name: 'write',
@@ -23,7 +24,12 @@ export const writeTool = {
   }
 };
 
-export async function executeWrite(args) {
+interface WriteArgs {
+  file_path: string;
+  content: string;
+}
+
+export async function executeWrite(args: WriteArgs): Promise<string> {
   const { file_path, content } = args;
 
   try {
@@ -39,6 +45,7 @@ export async function executeWrite(args) {
     const lines = content.split('\n').length;
     return `File written: ${file_path} (${lines} lines)`;
   } catch (err) {
-    return `Error writing file: ${err.message}`;
+    const error = err as Error;
+    return `Error writing file: ${error.message}`;
   }
 }

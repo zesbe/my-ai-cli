@@ -1,9 +1,10 @@
-import { exec } from 'child_process';
+import { exec, ExecException } from 'child_process';
 import { promisify } from 'util';
+import type { Tool } from '../types/index.js';
 
 const execAsync = promisify(exec);
 
-export const bashTool = {
+export const bashTool: Tool = {
   type: 'function',
   function: {
     name: 'bash',
@@ -25,7 +26,17 @@ export const bashTool = {
   }
 };
 
-export async function executeBash(args) {
+interface BashArgs {
+  command: string;
+  timeout?: number;
+}
+
+interface ExecError extends ExecException {
+  killed?: boolean;
+  stderr?: string;
+}
+
+export async function executeBash(args: BashArgs): Promise<string> {
   const { command, timeout = 30000 } = args;
 
   try {
@@ -41,9 +52,10 @@ export async function executeBash(args) {
 
     return output.trim() || '(no output)';
   } catch (err) {
-    if (err.killed) {
+    const error = err as ExecError;
+    if (error.killed) {
       return `Command timed out after ${timeout}ms`;
     }
-    return `Error: ${err.message}\n${err.stderr || ''}`;
+    return `Error: ${error.message}\n${error.stderr || ''}`;
   }
 }

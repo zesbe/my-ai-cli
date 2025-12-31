@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { render, Box, Text, useInput, useApp, useStdout } from 'ink';
+import { render, Box, Text, useInput, useApp } from 'ink';
 import TextInput from 'ink-text-input';
-import Spinner from 'ink-spinner';
 import SelectInput from 'ink-select-input';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
@@ -11,11 +10,18 @@ import { POPULAR_MCP_SERVERS, searchServers, getServerById, generateInstallConfi
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import type { Agent as AgentType } from './agent.js';
 
 // Session helper
 const SESSION_DIR = path.join(os.homedir(), '.zesbe', 'sessions');
 
-function listSavedSessions() {
+interface SavedSession {
+  name: string;
+  modified: Date;
+  summary: string;
+}
+
+function listSavedSessions(): SavedSession[] {
   if (!fs.existsSync(SESSION_DIR)) return [];
   try {
     return fs.readdirSync(SESSION_DIR)
@@ -27,22 +33,61 @@ function listSavedSessions() {
         try {
           const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
           summary = data.summary || '';
-        } catch (e) {}
+        } catch (_e) {
+          // Ignore parsing errors
+        }
         return { name: f.replace('.json', ''), modified: stat.mtime, summary };
       })
-      .sort((a, b) => b.modified - a.modified);
-  } catch (e) {
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  } catch (_e) {
     return [];
   }
 }
 
 const { createElement: h } = React;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONSTANTS
-// ═══════════════════════════════════════════════════════════════════════════
+// Ink Key type for useInput
+interface InkKey {
+  upArrow: boolean;
+  downArrow: boolean;
+  leftArrow: boolean;
+  rightArrow: boolean;
+  pageDown: boolean;
+  pageUp: boolean;
+  return: boolean;
+  escape: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  tab: boolean;
+  backspace: boolean;
+  delete: boolean;
+  meta: boolean;
+}
 
-const SLASH_COMMANDS = [
+// Type definitions
+interface SlashCommand {
+  value: string;
+  label: string;
+  description: string;
+}
+
+interface MessageData {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'error' | 'success';
+  content: string;
+  timestamp?: string;
+  tokens?: number;
+}
+
+interface SelectItem {
+  label: string;
+  value: string;
+  desc?: string;
+  isCurrent?: boolean;
+  recommended?: boolean;
+}
+
+// Constants
+const SLASH_COMMANDS: SlashCommand[] = [
   { value: '/help', label: '/help', description: 'Show all available commands' },
   { value: '/setup', label: '/setup', description: '🔑 Setup API key for provider' },
   { value: '/providers', label: '/providers', description: '📋 List all providers with pricing' },
@@ -68,15 +113,15 @@ const TYPING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '
 const BRAIN_FRAMES = ['🧠', '💭', '💡', '✨'];
 const ASSESS_FRAMES = ['◐', '◓', '◑', '◒'];
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENTS
-// ═══════════════════════════════════════════════════════════════════════════
+// Components
+interface AssessingIndicatorProps {
+  agentName?: string;
+}
 
-// Assessing Indicator - shows between user message and AI response
-const AssessingIndicator = ({ agentName = 'Zesbe' }) => {
+const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Zesbe' }) => {
   const [frame, setFrame] = useState(0);
   const [dots, setDots] = useState('');
-  
+
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % ASSESS_FRAMES.length);
@@ -85,7 +130,7 @@ const AssessingIndicator = ({ agentName = 'Zesbe' }) => {
     return () => clearInterval(timer);
   }, []);
 
-  return h(Box, { 
+  return h(Box, {
     justifyContent: 'center',
     marginY: 1,
     paddingX: 2
@@ -96,10 +141,13 @@ const AssessingIndicator = ({ agentName = 'Zesbe' }) => {
   );
 };
 
-// Typing Indicator Component
-const TypingIndicator = ({ type = 'dots' }) => {
+interface TypingIndicatorProps {
+  type?: 'dots' | 'brain';
+}
+
+const TypingIndicator: React.FC<TypingIndicatorProps> = ({ type = 'dots' }) => {
   const [frame, setFrame] = useState(0);
-  
+
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % (type === 'brain' ? BRAIN_FRAMES.length : TYPING_FRAMES.length));
@@ -110,19 +158,27 @@ const TypingIndicator = ({ type = 'dots' }) => {
   if (type === 'brain') {
     return h(Text, { color: 'cyan' }, `${BRAIN_FRAMES[frame]} AI is thinking...`);
   }
-  
+
   return h(Box, null,
     h(Text, { color: 'cyan' }, TYPING_FRAMES[frame]),
     h(Text, { color: 'gray' }, ' AI is typing...')
   );
 };
 
-// Status Bar Component
-const StatusBar = ({ provider, model, tokens, responseTime, yolo, skillsCount }) => {
+interface StatusBarProps {
+  provider: string;
+  model: string;
+  tokens: number;
+  responseTime: string | null;
+  yolo: boolean;
+  skillsCount: number;
+}
+
+const StatusBar: React.FC<StatusBarProps> = ({ provider, model, tokens, responseTime, yolo, skillsCount }) => {
   const providerName = PROVIDERS[provider]?.name || provider;
-  
-  return h(Box, { 
-    borderStyle: 'single', 
+
+  return h(Box, {
+    borderStyle: 'single',
     borderColor: 'gray',
     paddingX: 1,
     justifyContent: 'space-between',
@@ -141,10 +197,11 @@ const StatusBar = ({ provider, model, tokens, responseTime, yolo, skillsCount })
   );
 };
 
-// Message Component with timestamp
-const Message = ({ role, content, timestamp, tokens }) => {
+interface MessageProps extends MessageData {}
+
+const Message: React.FC<MessageProps> = ({ role, content, timestamp, tokens }) => {
   const time = timestamp ? new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '';
-  
+
   if (role === 'user') {
     return h(Box, { flexDirection: 'column', marginY: 1 },
       h(Box, { gap: 2 },
@@ -156,7 +213,7 @@ const Message = ({ role, content, timestamp, tokens }) => {
       )
     );
   }
-  
+
   if (role === 'assistant') {
     return h(Box, { flexDirection: 'column', marginY: 1 },
       h(Box, { gap: 2 },
@@ -197,22 +254,27 @@ const Message = ({ role, content, timestamp, tokens }) => {
   return null;
 };
 
-// Slash Menu Component
-const SlashMenu = ({ query, onSelect, onCancel }) => {
+interface SlashMenuProps {
+  query: string;
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+}
+
+const SlashMenu: React.FC<SlashMenuProps> = ({ query, onSelect, onCancel }) => {
   const searchTerm = query.toLowerCase().replace('/', '');
-  const filtered = SLASH_COMMANDS.filter(cmd => 
+  const filtered = SLASH_COMMANDS.filter(cmd =>
     cmd.value.includes(searchTerm) || cmd.description.toLowerCase().includes(searchTerm)
   );
 
-  useInput((input, key) => {
+  useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
 
   if (filtered.length === 0) return null;
 
-  return h(Box, { 
-    flexDirection: 'column', 
-    borderStyle: 'round', 
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
     borderColor: 'cyan',
     paddingX: 1,
     marginTop: 1
@@ -220,118 +282,131 @@ const SlashMenu = ({ query, onSelect, onCancel }) => {
     h(Text, { color: 'cyan', bold: true }, '📋 Commands:'),
     h(SelectInput, {
       items: filtered.map(c => ({ label: c.value, value: c.value, desc: c.description })),
-      onSelect: (item) => onSelect(item.value),
-      itemComponent: ({ isSelected, label, desc }) => 
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, desc }: any) =>
         h(Box, null,
-          h(Text, { color: isSelected ? 'cyan' : 'white', bold: isSelected }, 
+          h(Text, { color: isSelected ? 'cyan' : 'white', bold: isSelected },
             `${isSelected ? '▸ ' : '  '}${label.padEnd(15)}`),
-          h(Text, { color: 'gray' }, desc)
+          h(Text, { color: 'gray' }, desc || '')
         )
-    })
+    } as any)
   );
 };
 
-// Provider Menu
-const ProviderMenu = ({ onSelect, onCancel, current }) => {
+interface ProviderMenuProps {
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+  current: string;
+}
+
+const ProviderMenu: React.FC<ProviderMenuProps> = ({ onSelect, onCancel, current }) => {
   const providers = getProviderList();
-  
-  useInput((input, key) => {
+
+  useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
 
-  return h(Box, { 
+  return h(Box, {
     flexDirection: 'column',
     borderStyle: 'round',
     borderColor: 'magenta',
-    paddingX: 1 
+    paddingX: 1
   },
     h(Text, { color: 'magenta', bold: true }, '🔌 Select Provider:'),
     h(SelectInput, {
-      items: providers.map(p => ({ 
-        label: p.name, 
+      items: providers.map(p => ({
+        label: p.name,
         value: p.id,
         isCurrent: p.id === current
       })),
-      onSelect: (item) => onSelect(item.value),
-      itemComponent: ({ isSelected, label, isCurrent }) => 
-        h(Text, { 
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, isCurrent }: any) =>
+        h(Text, {
           color: isSelected ? 'magenta' : (isCurrent ? 'green' : 'white'),
-          bold: isSelected 
+          bold: isSelected
         }, `${isSelected ? '▸ ' : '  '}${label}${isCurrent ? ' ✓' : ''}`)
-    })
+    } as any)
   );
 };
 
-// Model Menu
-const ModelMenu = ({ provider, onSelect, onCancel, current }) => {
+interface ModelMenuProps {
+  provider: string;
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+  current: string;
+}
+
+const ModelMenu: React.FC<ModelMenuProps> = ({ provider, onSelect, onCancel, current }) => {
   const models = getModelsForProvider(provider);
-  
-  useInput((input, key) => {
+
+  useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
 
-  return h(Box, { 
+  return h(Box, {
     flexDirection: 'column',
-    borderStyle: 'round', 
+    borderStyle: 'round',
     borderColor: 'blue',
-    paddingX: 1 
+    paddingX: 1
   },
     h(Text, { color: 'blue', bold: true }, `🤖 Models for ${PROVIDERS[provider]?.name}:`),
     h(SelectInput, {
-      items: models.map(m => ({ 
+      items: models.map(m => ({
         label: m.name,
         value: m.id,
         desc: m.description,
         recommended: m.recommended,
         isCurrent: m.id === current
       })),
-      onSelect: (item) => onSelect(item.value),
-      itemComponent: ({ isSelected, label, desc, recommended, isCurrent }) => 
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, desc, recommended, isCurrent }: any) =>
         h(Box, { flexDirection: 'column' },
           h(Box, null,
-            h(Text, { 
+            h(Text, {
               color: isSelected ? 'blue' : (isCurrent ? 'green' : 'white'),
-              bold: isSelected 
+              bold: isSelected
             }, `${isSelected ? '▸ ' : '  '}${label}`),
             recommended && h(Text, { color: 'yellow' }, ' ⭐'),
             isCurrent && h(Text, { color: 'green' }, ' ✓')
           ),
-          h(Text, { color: 'gray', dimColor: true }, `    ${desc}`)
+          h(Text, { color: 'gray', dimColor: true }, `    ${desc || ''}`)
         )
-    })
+    } as any)
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN APP
-// ═══════════════════════════════════════════════════════════════════════════
+// Main App
+interface ChatAppProps {
+  agent: AgentType;
+  initialPrompt?: string;
+}
 
-const ChatApp = ({ agent, initialPrompt }) => {
+const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   const { exit } = useApp();
   const [query, setQuery] = useState('');
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<MessageData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [currentResponse, setCurrentResponse] = useState('');
-  const [tokenCount, setTokenCount] = useState(0);
+  const [_tokenCount, setTokenCount] = useState(0);
   const [totalTokens, setTotalTokens] = useState(0);
-  const [responseTime, setResponseTime] = useState(null);
+  const [responseTime, setResponseTime] = useState<string | null>(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
-  const startTime = useRef(null);
-  
+  const startTime = useRef<number | null>(null);
+
   // Buffered response for smoother rendering (reduce flicker)
   const responseBuffer = useRef('');
   const tokenBuffer = useRef(0);
-  const updateTimer = useRef(null);
+  const updateTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Abort controller for interrupting requests
-  const abortController = useRef(null);
+  const abortController = useRef<AbortController | null>(null);
 
   // Keyboard shortcuts
-  useInput((input, key) => {
+  useInput((input: string, key: InkKey) => {
     if (key.ctrl && input === 'c') {
       console.log('\n👋 Goodbye!\n');
       exit();
@@ -363,18 +438,18 @@ const ChatApp = ({ agent, initialPrompt }) => {
     setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu);
   }, [query, showProviderMenu, showModelMenu]);
 
-  const addMessage = (role, content, extra = {}) => {
-    setMessages(prev => [...prev, { 
-      role, 
-      content, 
+  const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
+    setMessages(prev => [...prev, {
+      role,
+      content,
       timestamp: new Date().toISOString(),
-      ...extra 
+      ...extra
     }]);
   };
 
-  const handleSubmit = async (input) => {
+  const handleSubmit = async (input: string): Promise<void> => {
     if (!input.trim()) return;
-    
+
     if (input.startsWith('/')) {
       await executeCommand(input.trim());
       setQuery('');
@@ -393,33 +468,33 @@ const ChatApp = ({ agent, initialPrompt }) => {
     try {
       let fullResponse = '';
       let tokens = 0;
-      
+
       // Reset buffers
       responseBuffer.current = '';
       tokenBuffer.current = 0;
-      
+
       // Flush buffer to UI (throttled updates reduce flicker)
-      const flushBuffer = () => {
+      const flushBuffer = (): void => {
         if (responseBuffer.current) {
           setCurrentResponse(responseBuffer.current);
           setTokenCount(tokenBuffer.current);
         }
       };
-      
+
       await agent.chat(input, {
         onStart: () => {
           setIsLoading(false);
           setIsTyping(true);
         },
-        onToken: (token) => {
+        onToken: (token: string) => {
           if (!token.includes('<think>') && !token.includes('</think>')) {
             fullResponse += token;
             tokens++;
-            
+
             // Buffer tokens, update UI every 80ms (reduces flicker)
             responseBuffer.current = fullResponse;
             tokenBuffer.current = tokens;
-            
+
             if (!updateTimer.current) {
               updateTimer.current = setTimeout(() => {
                 flushBuffer();
@@ -428,7 +503,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
             }
           }
         },
-        onToolCall: async (tool, args) => {
+        onToolCall: async (tool: string, args: Record<string, unknown>) => {
           // Flush before tool call
           if (updateTimer.current) {
             clearTimeout(updateTimer.current);
@@ -438,7 +513,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
           addMessage('tool', `🔧 ${tool}: ${JSON.stringify(args).substring(0, 100)}...`);
           return true;
         },
-        onToolResult: (tool, result) => {
+        onToolResult: (tool: string, _result: unknown) => {
           addMessage('tool', `✓ ${tool} completed`);
         },
         onEnd: () => {
@@ -447,8 +522,8 @@ const ChatApp = ({ agent, initialPrompt }) => {
             clearTimeout(updateTimer.current);
             updateTimer.current = null;
           }
-          
-          const elapsed = ((Date.now() - startTime.current) / 1000).toFixed(1);
+
+          const elapsed = ((Date.now() - (startTime.current || Date.now())) / 1000).toFixed(1);
           setResponseTime(`${elapsed}s`);
           setTotalTokens(prev => prev + tokens);
           if (fullResponse) {
@@ -458,7 +533,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
           setIsLoading(false);
           setIsTyping(false);
         },
-        onError: (err) => {
+        onError: (err: Error) => {
           if (updateTimer.current) {
             clearTimeout(updateTimer.current);
             updateTimer.current = null;
@@ -469,13 +544,14 @@ const ChatApp = ({ agent, initialPrompt }) => {
         }
       });
     } catch (err) {
-      addMessage('error', err.message);
+      const error = err as Error;
+      addMessage('error', error.message);
       setIsLoading(false);
       setIsTyping(false);
     }
   };
 
-  const executeCommand = async (cmd) => {
+  const executeCommand = async (cmd: string): Promise<void> => {
     const [command, ...argParts] = cmd.split(' ');
     const args = argParts.join(' ');
 
@@ -486,7 +562,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
 
 🔌 PROVIDER:
   /setup <name>    Setup API key with guide
-  /providers       List all providers  
+  /providers       List all providers
   /provider        Switch provider
   /model           Switch model
   /apikey <key>    Set API key
@@ -557,7 +633,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
           if (p) {
             agent.provider = args;
             agent.baseUrl = p.baseUrl;
-            agent.model = p.models?.[0]?.id || p.models?.[0] || agent.model;
+            agent.model = p.models?.[0]?.id || agent.model;
             addMessage('success', `Provider: ${p.name}, Model: ${agent.model}`);
           }
         } else {
@@ -571,7 +647,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
 
       case '/free':
         const free = getFreeProviders();
-        addMessage('system', `🆓 FREE PROVIDERS:\n${free.map(p => 
+        addMessage('system', `🆓 FREE PROVIDERS:\n${free.map(p =>
           `• ${p.name}: ${p.signupUrl}`
         ).join('\n')}`);
         break;
@@ -595,7 +671,8 @@ const ChatApp = ({ agent, initialPrompt }) => {
             agent.apiKey = args.trim();
             addMessage('success', `API key saved for ${info.name}`);
           } catch (e) {
-            addMessage('error', e.message);
+            const error = e as Error;
+            addMessage('error', error.message);
           }
         } else if (info) {
           addMessage('system', `🔐 Set API key:\n/apikey YOUR_KEY\n\nGet key: ${info.apiKeyUrl}`);
@@ -659,7 +736,7 @@ Create one of these files in your project root:
         const loadResult = agent.loadSession(loadName);
         if (loadResult.success) {
           addMessage('success', `Session loaded: ${loadName}
-📅 Saved: ${new Date(loadResult.savedAt).toLocaleString()}
+📅 Saved: ${new Date(loadResult.savedAt || '').toLocaleString()}
 💬 Messages: ${loadResult.messageCount}
 📝 Summary: ${loadResult.summary}`);
         } else {
@@ -671,7 +748,7 @@ Create one of these files in your project root:
         const resumeResult = agent.loadSession('last');
         if (resumeResult.success) {
           addMessage('success', `♻️ Session resumed!
-📅 From: ${new Date(resumeResult.savedAt).toLocaleString()}
+📅 From: ${new Date(resumeResult.savedAt || '').toLocaleString()}
 💬 Messages: ${resumeResult.messageCount}
 📝 ${resumeResult.summary}`);
         } else {
@@ -684,7 +761,7 @@ Create one of these files in your project root:
         if (sessions.length === 0) {
           addMessage('system', 'No saved sessions found.\nUse /save to save current session.');
         } else {
-          const list = sessions.slice(0, 10).map(s => 
+          const list = sessions.slice(0, 10).map(s =>
             `• ${s.name} (${new Date(s.modified).toLocaleDateString()})\n  ${s.summary}`
           ).join('\n');
           addMessage('system', `📚 SAVED SESSIONS:\n\n${list}\n\nUse /load <name> to load a session`);
@@ -698,9 +775,9 @@ Create one of these files in your project root:
 
         if (skillCmd === 'list' || !skillCmd) {
           skillsManager.scanSkills();
-          const available = Array.from(skillsManager.availableSkills.values());
+          const available = skillsManager.getAvailableSkills();
           const loaded = skillsManager.getLoadedSkills();
-          
+
           if (available.length === 0) {
             addMessage('system', `📚 SKILLS: No skills found.
 
@@ -733,7 +810,7 @@ Instructions for AI...`);
             if (result.alreadyLoaded) {
               addMessage('system', `Skill "${skillArgs}" already loaded`);
             } else {
-              addMessage('success', `✅ Loaded skill: ${result.skill.name}\n${result.skill.description}\n\n💡 The AI can now use this skill! Try asking:\n"${result.skill.name} help me with..."`);
+              addMessage('success', `✅ Loaded skill: ${result.skill?.name}\n${result.skill?.description}\n\n💡 The AI can now use this skill! Try asking:\n"${result.skill?.name} help me with..."`);
             }
           } else {
             addMessage('error', `Failed to load skill: ${result.error}`);
@@ -783,7 +860,7 @@ Skills directories:
         const mcpManager = getMCPManager();
         const mcpCmd = args.split(' ')[0];
         const mcpArgs = args.split(' ').slice(1).join(' ');
-        
+
         if (mcpCmd === 'list' || !mcpCmd) {
           const servers = mcpManager.listServers();
           if (servers.length === 0) {
@@ -804,7 +881,7 @@ Example config:
 
 Then run: /mcp connect`);
           } else {
-            const list = servers.map(s => 
+            const list = servers.map(s =>
               `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
             ).join('\n');
             addMessage('system', `🔌 MCP SERVERS:\n\n${list}`);
@@ -812,8 +889,8 @@ Then run: /mcp connect`);
         } else if (mcpCmd === 'connect') {
           addMessage('system', '🔌 Connecting to MCP servers...');
           const results = await mcpManager.connectAll();
-          const summary = results.map(r => 
-            r.success ? `✅ ${r.name}: ${r.tools.length} tools` : `❌ ${r.name}: ${r.error}`
+          const summary = results.map(r =>
+            r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
           ).join('\n');
           addMessage('system', `MCP Connection Results:\n${summary || 'No servers configured'}`);
         } else if (mcpCmd === 'disconnect') {
@@ -828,7 +905,7 @@ Then run: /mcp connect`);
             addMessage('system', `🔧 MCP TOOLS:\n\n${list}`);
           }
         } else if (mcpCmd === 'browse') {
-          const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s => 
+          const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s =>
             `${s.official ? '⭐' : '•'} ${s.id} - ${s.name} by ${s.author}\n   ${s.description}\n   Category: ${s.category} | ⭐ ${s.stars} stars`
           ).join('\n\n');
           addMessage('system', `🏪 POPULAR MCP SERVERS (Curated List):\n\n${list}\n\n📦 QUICK INSTALL:\n  /mcp install playwright    # Browser automation\n  /mcp install github        # GitHub integration\n  /mcp install filesystem    # File operations\n\n🔍 MORE OPTIONS:\n  /mcp search <query>        # Search servers\n  /mcp marketplace           # External marketplaces`);
@@ -841,7 +918,7 @@ Then run: /mcp connect`);
           if (results.length === 0) {
             addMessage('system', `No servers found for "${mcpArgs}"`);
           } else {
-            const list = results.slice(0, 8).map(s => 
+            const list = results.slice(0, 8).map(s =>
               `${s.official ? '⭐' : '•'} ${s.id} - ${s.name}\n   ${s.description}`
             ).join('\n\n');
             addMessage('system', `🔍 SEARCH RESULTS (${results.length}):\n\n${list}\n\nUse /mcp install <id> to add`);
@@ -872,7 +949,7 @@ Then run: /mcp connect`);
             addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
           }
         } else if (mcpCmd === 'marketplace') {
-          const list = MARKETPLACE_LINKS.map(m => 
+          const list = MARKETPLACE_LINKS.map(m =>
             `${m.icon} ${m.name}\n   ${m.description}\n   ${m.url}`
           ).join('\n\n');
           addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!\n\n💡 To install servers from our curated list:\n  /mcp browse        # See popular servers\n  /mcp install <id>  # Install directly`);
@@ -903,28 +980,30 @@ Config file: ~/.zesbe/mcp.json`);
     }
   };
 
-  const handleProviderSelect = (id) => {
+  const handleProviderSelect = (id: string): void => {
     setShowProviderMenu(false);
     const p = PROVIDERS[id];
     if (p) {
       agent.provider = id;
       agent.baseUrl = p.baseUrl;
-      
+
       // Load API key for new provider
       const keyFile = path.join(os.homedir(), p.apiKeyFile || `.${id}_api_key`);
       if (fs.existsSync(keyFile)) {
         try {
           agent.apiKey = fs.readFileSync(keyFile, 'utf-8').trim();
-        } catch (e) {}
+        } catch (_e) {
+          // Ignore read errors
+        }
       }
-      
+
       const firstModel = p.models?.[0];
       agent.model = typeof firstModel === 'object' ? firstModel.id : firstModel;
       addMessage('success', `Provider: ${p.name}, Model: ${agent.model}`);
     }
   };
 
-  const handleModelSelect = (id) => {
+  const handleModelSelect = (id: string): void => {
     setShowModelMenu(false);
     agent.model = id;
     addMessage('success', `Model: ${id}`);
@@ -950,10 +1029,10 @@ Config file: ~/.zesbe/mcp.json`);
 
     // Messages
     h(Box, { flexDirection: 'column', marginBottom: 1 },
-      ...messages.slice(-15).map((msg, i) => 
+      ...messages.slice(-15).map((msg, i) =>
         h(Message, { key: `${i}-${msg.role}`, ...msg })
       ),
-      
+
       // Assessing indicator (before AI responds)
       isLoading && h(AssessingIndicator, { agentName: 'Zesbe' }),
 
@@ -971,9 +1050,9 @@ Config file: ~/.zesbe/mcp.json`);
     ),
 
     // Menus
-    showSlashMenu && h(SlashMenu, { 
-      query, 
-      onSelect: (cmd) => { setShowSlashMenu(false); setQuery(''); executeCommand(cmd); },
+    showSlashMenu && h(SlashMenu, {
+      query,
+      onSelect: (cmd: string) => { setShowSlashMenu(false); setQuery(''); executeCommand(cmd); },
       onCancel: () => setShowSlashMenu(false)
     }),
     showProviderMenu && h(ProviderMenu, {
@@ -1014,16 +1093,13 @@ Config file: ~/.zesbe/mcp.json`);
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// EXPORT
-// ═══════════════════════════════════════════════════════════════════════════
-
-export async function startInkMode(agent, initialPrompt) {
+// Export
+export async function startInkMode(agent: AgentType, initialPrompt?: string): Promise<void> {
   if (!process.stdin.isTTY) {
     console.log('\n⚠️  Ink mode requires interactive terminal.\n');
     const { startInteractiveMode } = await import('./cli.js');
     return startInteractiveMode(agent, initialPrompt);
   }
-  
+
   render(h(ChatApp, { agent, initialPrompt }));
 }

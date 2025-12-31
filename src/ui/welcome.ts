@@ -6,35 +6,41 @@ import os from 'os';
 const VERSION = '1.0.0';
 
 // Get username
-function getUsername() {
+function getUsername(): string {
   return os.userInfo().username || process.env.USER || 'User';
 }
 
 // Get current directory
-function getCurrentDir() {
+function getCurrentDir(): string {
   return process.cwd();
 }
 
 // Create ZESBE ASCII art logo
-function createLogo() {
+function createLogo(): string {
   const logo = `
   ███████╗███████╗███████╗██████╗ ███████╗
   ╚══███╔╝██╔════╝██╔════╝██╔══██╗██╔════╝
-    ███╔╝ █████╗  ███████╗██████╔╝█████╗  
-   ███╔╝  ██╔══╝  ╚════██║██╔══██╗██╔══╝  
+    ███╔╝ █████╗  ███████╗██████╔╝█████╗
+   ███╔╝  ██╔══╝  ╚════██║██╔══██╗██╔══╝
   ███████╗███████╗███████║██████╔╝███████╗
   ╚══════╝╚══════╝╚══════╝╚═════╝ ╚══════╝`;
-  
+
   return gradient.pastel(logo);
 }
 
 // Simple compact logo for smaller screens
-function createCompactLogo() {
+function createCompactLogo(): string {
   return gradient.cristal('  ⚡ ZESBE AI CLI ⚡');
 }
 
+interface WelcomeOptions {
+  model?: string;
+  provider?: string;
+  yolo?: boolean;
+}
+
 // Create welcome box
-export function showWelcome(options = {}) {
+export function showWelcome(options: WelcomeOptions = {}): void {
   const username = getUsername();
   const cwd = getCurrentDir();
   const model = options.model || 'gpt-4o';
@@ -89,13 +95,13 @@ export function showWelcome(options = {}) {
 }
 
 // Show compact header for subsequent prompts
-export function showHeader(model, provider) {
+export function showHeader(model: string, provider: string): string {
   const header = chalk.cyan(`[${provider}/${model}]`);
   return header;
 }
 
 // Show goodbye message
-export function showGoodbye() {
+export function showGoodbye(): void {
   console.log(boxen(
     gradient.pastel('\n  👋 Goodbye! Session saved.\n'),
     {
@@ -106,3 +112,5 @@ export function showGoodbye() {
     }
   ));
 }
+
+export { VERSION };

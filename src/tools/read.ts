@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { Tool } from '../types/index.js';
 
-export const readTool = {
+export const readTool: Tool = {
   type: 'function',
   function: {
     name: 'read',
@@ -27,7 +28,17 @@ export const readTool = {
   }
 };
 
-export async function executeRead(args) {
+interface ReadArgs {
+  file_path: string;
+  offset?: number;
+  limit?: number;
+}
+
+interface NodeError extends Error {
+  code?: string;
+}
+
+export async function executeRead(args: ReadArgs): Promise<string> {
   const { file_path, offset = 1, limit } = args;
 
   try {
@@ -48,9 +59,10 @@ export async function executeRead(args) {
 
     return numberedLines.join('\n');
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    const error = err as NodeError;
+    if (error.code === 'ENOENT') {
       return `File not found: ${file_path}`;
     }
-    return `Error reading file: ${err.message}`;
+    return `Error reading file: ${error.message}`;
   }
 }

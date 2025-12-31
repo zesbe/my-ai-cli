@@ -3,7 +3,22 @@
  * User-friendly documentation for each AI provider
  */
 
-export const PROVIDER_INFO = {
+export interface ProviderInfoItem {
+  name: string;
+  description: string;
+  website: string;
+  pricing: string;
+  freeCredits: string;
+  apiKeyUrl: string | null;
+  signupUrl: string;
+  docsUrl: string;
+  envVar: string | null;
+  apiKeyFile?: string;
+  steps: string[];
+  tips: string[];
+}
+
+export const PROVIDER_INFO: Record<string, ProviderInfoItem> = {
   minimax: {
     name: 'MiniMax',
     description: 'Chinese AI with excellent coding capabilities',
@@ -305,26 +320,26 @@ export const PROVIDER_INFO = {
 };
 
 // Get provider setup guide
-export function getProviderGuide(providerId) {
+export function getProviderGuide(providerId: string): ProviderInfoItem | null {
   return PROVIDER_INFO[providerId] || null;
 }
 
 // Get all providers with free tiers
-export function getFreeProviders() {
+export function getFreeProviders(): Array<{ id: string } & ProviderInfoItem> {
   return Object.entries(PROVIDER_INFO)
-    .filter(([_, info]) => 
-      info.pricing.toLowerCase().includes('free') || 
+    .filter(([, info]) =>
+      info.pricing.toLowerCase().includes('free') ||
       info.freeCredits.toLowerCase().includes('free')
     )
     .map(([id, info]) => ({ id, ...info }));
 }
 
 // Format provider info for display
-export function formatProviderGuide(providerId) {
+export function formatProviderGuide(providerId: string): string | null {
   const info = PROVIDER_INFO[providerId];
   if (!info) return null;
 
-  let guide = `
+  const guide = `
 ╔══════════════════════════════════════════════════════════════╗
 ║  ${info.name.toUpperCase().padEnd(56)}  ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -355,8 +370,8 @@ ${info.tips.map(t => `   ${t}`).join('\n')}
 }
 
 // Quick reference for all providers
-export function getAllProvidersQuickRef() {
-  let ref = `
+export function getAllProvidersQuickRef(): string {
+  const ref = `
 ╔══════════════════════════════════════════════════════════════╗
 ║              🔌 AI PROVIDERS QUICK REFERENCE                 ║
 ╚══════════════════════════════════════════════════════════════╝

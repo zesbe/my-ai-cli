@@ -1,8 +1,10 @@
 // Web Fetch Tool - Fetch content from URLs
 import https from 'https';
 import http from 'http';
+import type { Tool } from '../types/index.js';
+import type { IncomingMessage, ClientRequest } from 'http';
 
-export const webTool = {
+export const webTool: Tool = {
   type: 'function',
   function: {
     name: 'web_fetch',
@@ -20,19 +22,25 @@ export const webTool = {
   }
 };
 
-export async function executeWebFetch({ url }) {
+interface WebFetchArgs {
+  url: string;
+}
+
+export async function executeWebFetch(args: WebFetchArgs): Promise<string> {
+  const { url } = args;
+
   return new Promise((resolve) => {
     try {
       const protocol = url.startsWith('https') ? https : http;
-      
-      const req = protocol.get(url, { 
+
+      const req: ClientRequest = protocol.get(url, {
         timeout: 10000,
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; ZesbeCLI/1.0)'
         }
-      }, (res) => {
+      }, (res: IncomingMessage) => {
         // Handle redirects
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           executeWebFetch({ url: res.headers.location }).then(resolve);
           return;
         }
@@ -43,7 +51,7 @@ export async function executeWebFetch({ url }) {
         }
 
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk: Buffer) => data += chunk.toString());
         res.on('end', () => {
           // Strip HTML tags for cleaner output
           const text = data
@@ -53,18 +61,19 @@ export async function executeWebFetch({ url }) {
             .replace(/\s+/g, ' ')
             .trim()
             .substring(0, 10000); // Limit to 10k chars
-          
+
           resolve(text || 'No content found');
         });
       });
 
-      req.on('error', (e) => resolve(`Error: ${e.message}`));
+      req.on('error', (e: Error) => resolve(`Error: ${e.message}`));
       req.on('timeout', () => {
         req.destroy();
         resolve('Error: Request timeout');
       });
     } catch (e) {
-      resolve(`Error: ${e.message}`);
+      const error = e as Error;
+      resolve(`Error: ${error.message}`);
     }
   });
 }

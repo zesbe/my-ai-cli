@@ -1,9 +1,10 @@
-import { exec } from 'child_process';
+import { exec, ExecException } from 'child_process';
 import { promisify } from 'util';
+import type { Tool } from '../types/index.js';
 
 const execAsync = promisify(exec);
 
-export const grepTool = {
+export const grepTool: Tool = {
   type: 'function',
   function: {
     name: 'grep',
@@ -33,7 +34,18 @@ export const grepTool = {
   }
 };
 
-export async function executeGrep(args) {
+interface GrepArgs {
+  pattern: string;
+  path?: string;
+  include?: string;
+  ignore_case?: boolean;
+}
+
+interface ExecError extends ExecException {
+  code?: number;
+}
+
+export async function executeGrep(args: GrepArgs): Promise<string> {
   const { pattern, path: searchPath = '.', include, ignore_case = false } = args;
 
   try {
@@ -50,9 +62,10 @@ export async function executeGrep(args) {
 
     return stdout.trim();
   } catch (err) {
-    if (err.code === 1) {
+    const error = err as ExecError;
+    if (error.code === 1) {
       return 'No matches found';
     }
-    return `Error searching: ${err.message}`;
+    return `Error searching: ${error.message}`;
   }
 }

@@ -6,9 +6,10 @@ import { globTool, executeGlob } from './glob.js';
 import { grepTool, executeGrep } from './grep.js';
 import { webTool, executeWebFetch } from './web.js';
 import { getMCPManager } from '../mcp/client.js';
+import type { Tool, ToolExecutor } from '../types/index.js';
 
 // Built-in tool definitions
-export const builtInTools = [
+export const builtInTools: Tool[] = [
   bashTool,
   readTool,
   writeTool,
@@ -19,7 +20,7 @@ export const builtInTools = [
 ];
 
 // Get all tools (built-in + MCP)
-export function getAllTools() {
+export function getAllTools(): Tool[] {
   const mcpManager = getMCPManager();
   const mcpTools = mcpManager.getToolsForAI();
   return [...builtInTools, ...mcpTools];
@@ -28,25 +29,26 @@ export function getAllTools() {
 // For backward compatibility
 export const tools = builtInTools;
 
-// Tool executors
-const executors = {
-  bash: executeBash,
-  read: executeRead,
-  write: executeWrite,
-  edit: executeEdit,
-  glob: executeGlob,
-  grep: executeGrep,
-  web_fetch: executeWebFetch
+// Tool executors map
+const executors: Record<string, ToolExecutor> = {
+  bash: executeBash as ToolExecutor,
+  read: executeRead as ToolExecutor,
+  write: executeWrite as ToolExecutor,
+  edit: executeEdit as ToolExecutor,
+  glob: executeGlob as ToolExecutor,
+  grep: executeGrep as ToolExecutor,
+  web_fetch: executeWebFetch as ToolExecutor
 };
 
-export async function executeTool(name, args) {
+export async function executeTool(name: string, args: Record<string, unknown>): Promise<string | object> {
   // Check if it's an MCP tool
   if (name.startsWith('mcp_')) {
     const mcpManager = getMCPManager();
     try {
       return await mcpManager.executeTool(name, args);
     } catch (err) {
-      return `Error executing MCP tool ${name}: ${err.message}`;
+      const error = err as Error;
+      return `Error executing MCP tool ${name}: ${error.message}`;
     }
   }
 
@@ -59,6 +61,16 @@ export async function executeTool(name, args) {
   try {
     return await executor(args);
   } catch (err) {
-    return `Error executing ${name}: ${err.message}`;
+    const error = err as Error;
+    return `Error executing ${name}: ${error.message}`;
   }
 }
+
+// Re-export individual tools
+export { bashTool, executeBash };
+export { readTool, executeRead };
+export { writeTool, executeWrite };
+export { editTool, executeEdit };
+export { globTool, executeGlob };
+export { grepTool, executeGrep };
+export { webTool, executeWebFetch };

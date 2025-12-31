@@ -3,7 +3,23 @@
  * Comprehensive list of all supported AI providers and models
  */
 
-export const PROVIDERS = {
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  recommended?: boolean;
+}
+
+export interface ProviderConfig {
+  name: string;
+  baseUrl: string;
+  apiKeyEnv: string | null;
+  apiKeyFile: string | null;
+  description: string;
+  models: ModelInfo[];
+}
+
+export const PROVIDERS: Record<string, ProviderConfig> = {
   minimax: {
     name: 'MiniMax',
     baseUrl: 'https://api.minimax.chat/v1',
@@ -69,7 +85,7 @@ export const PROVIDERS = {
     baseUrl: 'https://api.x.ai/v1',
     apiKeyEnv: 'XAI_API_KEY',
     apiKeyFile: '.xai_api_key',
-    description: 'Grok models by Elon Musk\'s xAI',
+    description: "Grok models by Elon Musk's xAI",
     models: [
       { id: 'grok-3', name: 'Grok 3', description: 'Most advanced - 1M context', recommended: true },
       { id: 'grok-3-mini', name: 'Grok 3 Mini', description: 'Cost-efficient reasoning' },
@@ -172,7 +188,7 @@ export const PROVIDERS = {
 };
 
 // Get all providers as array
-export function getProviderList() {
+export function getProviderList(): Array<{ id: string } & ProviderConfig> {
   return Object.entries(PROVIDERS).map(([id, provider]) => ({
     id,
     ...provider
@@ -180,30 +196,30 @@ export function getProviderList() {
 }
 
 // Get provider by ID
-export function getProvider(providerId) {
+export function getProvider(providerId: string): ProviderConfig | null {
   return PROVIDERS[providerId] || null;
 }
 
 // Get all models for a provider
-export function getModelsForProvider(providerId) {
+export function getModelsForProvider(providerId: string): ModelInfo[] {
   const provider = PROVIDERS[providerId];
   return provider ? provider.models : [];
 }
 
 // Get recommended model for provider
-export function getRecommendedModel(providerId) {
+export function getRecommendedModel(providerId: string): ModelInfo | null {
   const models = getModelsForProvider(providerId);
   return models.find(m => m.recommended) || models[0] || null;
 }
 
 // Search models across all providers
-export function searchModels(query) {
-  const results = [];
+export function searchModels(query: string): Array<{ providerId: string; providerName: string } & ModelInfo> {
+  const results: Array<{ providerId: string; providerName: string } & ModelInfo> = [];
   const q = query.toLowerCase();
-  
+
   for (const [providerId, provider] of Object.entries(PROVIDERS)) {
     for (const model of provider.models) {
-      if (model.id.toLowerCase().includes(q) || 
+      if (model.id.toLowerCase().includes(q) ||
           model.name.toLowerCase().includes(q) ||
           model.description.toLowerCase().includes(q)) {
         results.push({
@@ -214,13 +230,13 @@ export function searchModels(query) {
       }
     }
   }
-  
+
   return results;
 }
 
 // Get flat list of all models
-export function getAllModels() {
-  const models = [];
+export function getAllModels(): Array<{ providerId: string; providerName: string } & ModelInfo> {
+  const models: Array<{ providerId: string; providerName: string } & ModelInfo> = [];
   for (const [providerId, provider] of Object.entries(PROVIDERS)) {
     for (const model of provider.models) {
       models.push({

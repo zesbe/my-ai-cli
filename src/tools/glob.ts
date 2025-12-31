@@ -1,9 +1,10 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import type { Tool } from '../types/index.js';
 
 const execAsync = promisify(exec);
 
-export const globTool = {
+export const globTool: Tool = {
   type: 'function',
   function: {
     name: 'glob',
@@ -25,7 +26,12 @@ export const globTool = {
   }
 };
 
-export async function executeGlob(args) {
+interface GlobArgs {
+  pattern: string;
+  path?: string;
+}
+
+export async function executeGlob(args: GlobArgs): Promise<string> {
   const { pattern, path: searchPath = '.' } = args;
 
   try {
@@ -43,6 +49,7 @@ export async function executeGlob(args) {
 
     return files.join('\n');
   } catch (err) {
-    return `Error searching files: ${err.message}`;
+    const error = err as Error;
+    return `Error searching files: ${error.message}`;
   }
 }

@@ -3,8 +3,31 @@
  * Integrates with popular MCP registries
  */
 
+import type { MCPMarketplaceServer } from '../types/index.js';
+
+// Install configuration interface
+interface InstallConfig {
+  command: string;
+  args: string[];
+  requiresPath?: boolean;
+  requiresToken?: string;
+  env?: Record<string, string>;
+}
+
+// Server definition interface
+interface MCPServerDefinition {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  category: string;
+  install: InstallConfig;
+  stars: number;
+  official: boolean;
+}
+
 // Popular MCP Servers curated list
-export const POPULAR_MCP_SERVERS = [
+export const POPULAR_MCP_SERVERS: MCPServerDefinition[] = [
   {
     id: 'filesystem',
     name: 'Filesystem',
@@ -113,7 +136,7 @@ export const POPULAR_MCP_SERVERS = [
     install: {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-slack'],
-      env: { 
+      env: {
         SLACK_BOT_TOKEN: '{TOKEN}',
         SLACK_TEAM_ID: '{TEAM_ID}'
       },
@@ -182,7 +205,7 @@ export const POPULAR_MCP_SERVERS = [
 ];
 
 // Categories for filtering
-export const MCP_CATEGORIES = [
+export const MCP_CATEGORIES: string[] = [
   'All',
   'Official',
   'Browser Automation',
@@ -198,15 +221,15 @@ export const MCP_CATEGORIES = [
 ];
 
 // Get servers by category
-export function getServersByCategory(category = 'All') {
+export function getServersByCategory(category: string = 'All'): MCPServerDefinition[] {
   if (category === 'All') return POPULAR_MCP_SERVERS;
   return POPULAR_MCP_SERVERS.filter(s => s.category === category);
 }
 
 // Search servers
-export function searchServers(query) {
+export function searchServers(query: string): MCPServerDefinition[] {
   const q = query.toLowerCase();
-  return POPULAR_MCP_SERVERS.filter(s => 
+  return POPULAR_MCP_SERVERS.filter(s =>
     s.name.toLowerCase().includes(q) ||
     s.description.toLowerCase().includes(q) ||
     s.author.toLowerCase().includes(q) ||
@@ -215,15 +238,29 @@ export function searchServers(query) {
 }
 
 // Get server by ID
-export function getServerById(id) {
+export function getServerById(id: string): MCPServerDefinition | undefined {
   return POPULAR_MCP_SERVERS.find(s => s.id === id);
 }
 
+// Options for generating install config
+interface InstallOptions {
+  path?: string;
+  token?: string;
+  teamId?: string;
+}
+
+// Generated config output
+interface GeneratedConfig {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
 // Generate install config for server
-export function generateInstallConfig(server, options = {}) {
+export function generateInstallConfig(server: MCPServerDefinition, options: InstallOptions = {}): GeneratedConfig {
   const { path: userPath, token, teamId } = options;
-  
-  const config = {
+
+  const config: GeneratedConfig = {
     command: server.install.command,
     args: [...server.install.args],
     env: { ...server.install.env }
@@ -248,8 +285,16 @@ export function generateInstallConfig(server, options = {}) {
   return config;
 }
 
+// Marketplace link interface
+interface MarketplaceLink {
+  name: string;
+  url: string;
+  description: string;
+  icon: string;
+}
+
 // External marketplace links
-export const MARKETPLACE_LINKS = [
+export const MARKETPLACE_LINKS: MarketplaceLink[] = [
   {
     name: 'Glama',
     url: 'https://glama.ai/mcp/servers',
@@ -275,3 +320,5 @@ export const MARKETPLACE_LINKS = [
     icon: '⭐'
   }
 ];
+
+export type { MCPServerDefinition, InstallConfig, InstallOptions, GeneratedConfig, MarketplaceLink };

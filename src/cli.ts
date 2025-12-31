@@ -7,15 +7,19 @@ import path from 'path';
 import { showGoodbye } from './ui/welcome.js';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
+import type { Agent as AgentType } from './agent.js';
 
 // Filter out <think>...</think> tags from streaming output
 class ThinkingFilter {
+  private buffer: string;
+  private inThinking: boolean;
+
   constructor() {
     this.buffer = '';
     this.inThinking = false;
   }
 
-  process(token) {
+  process(token: string): string {
     this.buffer += token;
     let output = '';
 
@@ -45,7 +49,7 @@ class ThinkingFilter {
     return output;
   }
 
-  flush() {
+  flush(): string {
     const remaining = this.inThinking ? '' : this.buffer;
     this.buffer = '';
     this.inThinking = false;
@@ -53,7 +57,13 @@ class ThinkingFilter {
   }
 }
 
-export async function startInteractiveMode(agent, initialPrompt) {
+interface ApiKeyPromptResult {
+  needInput: 'apikey';
+  keyFile: string;
+  providerInfo: typeof PROVIDER_INFO[keyof typeof PROVIDER_INFO];
+}
+
+export async function startInteractiveMode(agent: AgentType, initialPrompt?: string): Promise<void> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -75,13 +85,13 @@ export async function startInteractiveMode(agent, initialPrompt) {
     process.exit(0);
   });
 
-  const showPrompt = () => {
+  const showPrompt = (): void => {
     console.log('');
     console.log(chalk.gray('─'.repeat(70)));
     process.stdout.write(chalk.cyan.bold('> '));
   };
 
-  const showHelp = () => {
+  const showHelp = (): void => {
     console.log(chalk.cyan(`
 📚 MY AI CLI - COMMAND REFERENCE (Classic Mode)
 
@@ -117,7 +127,7 @@ export async function startInteractiveMode(agent, initialPrompt) {
 `));
   };
 
-  const showTools = () => {
+  const showTools = (): void => {
     console.log(chalk.cyan(`
 🔧 AVAILABLE TOOLS:
 
@@ -135,7 +145,7 @@ Search:
 `));
   };
 
-  const handleCommand = async (input) => {
+  const handleCommand = async (input: string): Promise<boolean | ApiKeyPromptResult> => {
     const parts = input.split(' ');
     const cmd = parts[0];
     const args = parts.slice(1).join(' ');
@@ -277,7 +287,8 @@ Search:
             agent.apiKey = args.trim();
             console.log(chalk.green(`  ✓ API key saved to ${keyFile}\n`));
           } catch (e) {
-            console.log(chalk.red(`  ✗ Failed to save: ${e.message}\n`));
+            const error = e as Error;
+            console.log(chalk.red(`  ✗ Failed to save: ${error.message}\n`));
           }
         } else {
           // Interactive prompt for API key
@@ -285,7 +296,7 @@ Search:
           console.log(chalk.blue(`  📍 Get key: ${providerInfo.apiKeyUrl}\n`));
           console.log(chalk.gray(`  Current: ${exists ? 'Key exists ✓' : 'Not set ✗'}`));
           console.log('');
-          
+
           // Return special value to trigger interactive input
           return { needInput: 'apikey', keyFile, providerInfo };
         }
@@ -331,7 +342,8 @@ Search:
           fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
           console.log(chalk.green(`  ✓ Session saved to ${saveFile}\n`));
         } catch (e) {
-          console.log(chalk.red(`  ✗ Save failed: ${e.message}\n`));
+          const error = e as Error;
+          console.log(chalk.red(`  ✗ Save failed: ${error.message}\n`));
         }
         return true;
 
@@ -348,7 +360,8 @@ Search:
           messageCount = data.messageCount || 0;
           console.log(chalk.green(`  ✓ Session loaded from ${args}\n`));
         } catch (e) {
-          console.log(chalk.red(`  ✗ Load failed: ${e.message}\n`));
+          const error = e as Error;
+          console.log(chalk.red(`  ✗ Load failed: ${error.message}\n`));
         }
         return true;
 
@@ -362,9 +375,9 @@ Search:
     }
   };
 
-  const prompt = () => {
+  const prompt = (): void => {
     showPrompt();
-    rl.question('', async (input) => {
+    rl.question('', async (input: string) => {
       input = input.trim();
 
       if (!input) {
@@ -375,15 +388,15 @@ Search:
       // Handle commands
       if (input.startsWith('/')) {
         const handled = await handleCommand(input);
-        
+
         // Check if command needs interactive input
         if (handled && typeof handled === 'object' && handled.needInput === 'apikey') {
           console.log(chalk.cyan('  Masukkan API key (atau ketik "cancel" untuk batal):'));
           process.stdout.write(chalk.yellow('  > '));
-          
-          rl.question('', (apiKeyInput) => {
+
+          rl.question('', (apiKeyInput: string) => {
             apiKeyInput = apiKeyInput.trim();
-            
+
             if (apiKeyInput && apiKeyInput.toLowerCase() !== 'cancel') {
               try {
                 fs.writeFileSync(handled.keyFile, apiKeyInput);
@@ -392,7 +405,8 @@ Search:
                 console.log(chalk.green(`\n  ✓ API key saved!`));
                 console.log(chalk.gray(`  File: ${handled.keyFile}\n`));
               } catch (e) {
-                console.log(chalk.red(`\n  ✗ Failed: ${e.message}\n`));
+                const error = e as Error;
+                console.log(chalk.red(`\n  ✗ Failed: ${error.message}\n`));
               }
             } else {
               console.log(chalk.gray('\n  Cancelled.\n'));
@@ -401,7 +415,7 @@ Search:
           });
           return;
         }
-        
+
         if (handled) {
           setImmediate(() => prompt());
           return;
@@ -426,14 +440,14 @@ Search:
             console.log(chalk.gray('─'.repeat(70)));
             process.stdout.write(chalk.magenta(''));
           },
-          onToken: (token) => {
+          onToken: (token: string) => {
             const filtered = filter.process(token);
             if (filtered) {
               process.stdout.write(filtered);
               tokenCount++;
             }
           },
-          onToolCall: async (tool, args) => {
+          onToolCall: async (tool: string, args: Record<string, unknown>) => {
             if (spinner.isSpinning) spinner.stop();
             console.log('\n' + chalk.yellow(`🔧 Tool: ${tool}`));
             const argsStr = JSON.stringify(args, null, 2);
@@ -441,8 +455,8 @@ Search:
 
             if (!agent.yolo) {
               process.stdout.write(chalk.yellow('Approve? [y/N]: '));
-              const approved = await new Promise(resolve => {
-                rl.question('', (answer) => {
+              const approved = await new Promise<boolean>(resolve => {
+                rl.question('', (answer: string) => {
                   resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
                 });
               });
@@ -451,23 +465,24 @@ Search:
             console.log(chalk.green('✓ Auto-approved (YOLO mode)'));
             return true;
           },
-          onToolResult: (tool, result) => {
+          onToolResult: (tool: string, result: unknown) => {
             console.log(chalk.green(`✓ ${tool} completed`));
-            if (result && result.length < 300) {
+            if (result && String(result).length < 300) {
               console.log(chalk.gray(String(result).substring(0, 300)));
             }
           },
           onEnd: () => {
             console.log('\n');
           },
-          onError: (err) => {
+          onError: (err: Error) => {
             if (spinner.isSpinning) spinner.stop();
             console.log(chalk.red(`\n✗ Error: ${err.message}\n`));
           }
         });
       } catch (err) {
         if (spinner.isSpinning) spinner.stop();
-        console.log(chalk.red(`\n✗ Error: ${err.message}`));
+        const error = err as Error;
+        console.log(chalk.red(`\n✗ Error: ${error.message}`));
       } finally {
         setImmediate(() => prompt());
       }
@@ -495,20 +510,20 @@ Search:
           if (spinner.isSpinning) spinner.stop();
           console.log(chalk.gray('─'.repeat(70)));
         },
-        onToken: (token) => {
+        onToken: (token: string) => {
           const filtered = filter.process(token);
           if (filtered) {
             process.stdout.write(filtered);
             tokenCount++;
           }
         },
-        onToolCall: async (tool, args) => {
+        onToolCall: async (tool: string, _args: Record<string, unknown>) => {
           if (spinner.isSpinning) spinner.stop();
           console.log('\n' + chalk.yellow(`🔧 Tool: ${tool}`));
           if (!agent.yolo) {
             process.stdout.write(chalk.yellow('Approve? [y/N]: '));
-            const approved = await new Promise(resolve => {
-              rl.question('', (answer) => {
+            const approved = await new Promise<boolean>(resolve => {
+              rl.question('', (answer: string) => {
                 resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
               });
             });
@@ -523,7 +538,8 @@ Search:
       });
     } catch (err) {
       if (spinner.isSpinning) spinner.stop();
-      console.log(chalk.red(`\n✗ Error: ${err.message}`));
+      const error = err as Error;
+      console.log(chalk.red(`\n✗ Error: ${error.message}`));
     }
   }
 

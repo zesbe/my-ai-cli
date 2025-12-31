@@ -6,8 +6,25 @@ const HOME = os.homedir();
 const CONFIG_DIR = path.join(HOME, '.my-ai-cli');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
+// Provider configuration interface
+interface ProviderConfigItem {
+  baseUrl: string;
+  apiKeyFile?: string;
+  apiKey?: string;
+  models: string[];
+}
+
+// Full configuration interface
+interface Config {
+  provider: string;
+  model: string;
+  yolo: boolean;
+  stream: boolean;
+  providers: Record<string, ProviderConfigItem>;
+}
+
 // Default configuration
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG: Config = {
   provider: 'minimax',
   model: 'minimax-m2.1',
   yolo: true,
@@ -47,21 +64,21 @@ const DEFAULT_CONFIG = {
 };
 
 // Ensure config directory exists
-function ensureConfigDir() {
+function ensureConfigDir(): void {
   if (!fs.existsSync(CONFIG_DIR)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
   }
 }
 
 // Load configuration
-export function loadConfig() {
+export function loadConfig(): Config {
   ensureConfigDir();
 
   if (fs.existsSync(CONFIG_FILE)) {
     try {
       const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
       return { ...DEFAULT_CONFIG, ...JSON.parse(data) };
-    } catch (e) {
+    } catch (_e) {
       return DEFAULT_CONFIG;
     }
   }
@@ -72,13 +89,13 @@ export function loadConfig() {
 }
 
 // Save configuration
-export function saveConfig(config) {
+export function saveConfig(config: Config): void {
   ensureConfigDir();
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 // Get API key for provider
-export function getApiKey(provider, config) {
+export function getApiKey(provider: string, config: Config): string | null {
   const providerConfig = config.providers[provider];
 
   if (!providerConfig) {
@@ -94,13 +111,13 @@ export function getApiKey(provider, config) {
   if (providerConfig.apiKeyFile && fs.existsSync(providerConfig.apiKeyFile)) {
     try {
       return fs.readFileSync(providerConfig.apiKeyFile, 'utf-8').trim();
-    } catch (e) {
+    } catch (_e) {
       return null;
     }
   }
 
   // Check environment variables
-  const envVars = {
+  const envVars: Record<string, string> = {
     minimax: 'MINIMAX_API_KEY',
     openai: 'OPENAI_API_KEY',
     anthropic: 'ANTHROPIC_API_KEY',
@@ -109,19 +126,19 @@ export function getApiKey(provider, config) {
   };
 
   if (envVars[provider] && process.env[envVars[provider]]) {
-    return process.env[envVars[provider]];
+    return process.env[envVars[provider]] || null;
   }
 
   return null;
 }
 
 // Get provider config
-export function getProviderConfig(provider, config) {
+export function getProviderConfig(provider: string, config: Config): ProviderConfigItem | null {
   return config.providers[provider] || null;
 }
 
 // Save API key
-export function saveApiKey(provider, apiKey) {
+export function saveApiKey(provider: string, apiKey: string): boolean {
   const config = loadConfig();
   const providerConfig = config.providers[provider];
 
@@ -136,3 +153,4 @@ export function saveApiKey(provider, apiKey) {
 }
 
 export { CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG };
+export type { Config, ProviderConfigItem };

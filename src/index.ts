@@ -8,14 +8,28 @@ import { startInteractiveMode } from './cli.js';
 import { startInkMode } from './ink-cli.js';
 import { Agent } from './agent.js';
 import { showWelcome } from './ui/welcome.js';
-import { loadConfig, getApiKey, getProviderConfig, saveApiKey } from './config.js';
+import { loadConfig, getApiKey, getProviderConfig, saveApiKey, saveConfig } from './config.js';
+import type { Config } from './config.js';
 
 dotenv.config();
 
 const program = new Command();
 
 // Load saved configuration
-const config = loadConfig();
+const config: Config = loadConfig();
+
+interface CLIOptions {
+  model: string;
+  provider: string;
+  baseUrl?: string;
+  apiKey?: string;
+  system?: string;
+  yolo: boolean;
+  quiet: boolean;
+  stream: boolean;
+  classic: boolean;
+  setup: boolean;
+}
 
 program
   .name('zesbe')
@@ -32,7 +46,7 @@ program
   .option('--classic', 'Use classic readline mode instead of Ink')
   .option('--setup', 'Run setup wizard')
   .argument('[prompt...]', 'Initial prompt')
-  .action(async (promptArgs, options) => {
+  .action(async (promptArgs: string[], options: CLIOptions) => {
     // Run setup if requested
     if (options.setup) {
       await runSetup();
@@ -57,7 +71,7 @@ program
 
     // Get API key (auto-load from config/file)
     let apiKey = options.apiKey || getApiKey(options.provider, config);
-    let baseUrl = options.baseUrl || providerConfig.baseUrl;
+    const baseUrl = options.baseUrl || providerConfig.baseUrl;
 
     // If no API key found, prompt for it
     if (!apiKey && options.provider !== 'ollama') {
@@ -69,8 +83,8 @@ program
         output: process.stdout
       });
 
-      apiKey = await new Promise((resolve) => {
-        rl.question(chalk.cyan('  Enter API key (will be saved): '), (answer) => {
+      apiKey = await new Promise<string>((resolve) => {
+        rl.question(chalk.cyan('  Enter API key (will be saved): '), (answer: string) => {
           rl.close();
           resolve(answer.trim());
         });
@@ -99,7 +113,7 @@ program
     const agent = new Agent({
       provider: options.provider,
       model: selectedModel,
-      apiKey,
+      apiKey: apiKey || '',
       baseUrl,
       systemPrompt: options.system,
       yolo: options.yolo,
@@ -108,7 +122,7 @@ program
 
     // Start CLI
     const initialPrompt = promptArgs.join(' ');
-    
+
     if (options.classic) {
       // Classic readline mode
       await startInteractiveMode(agent, initialPrompt);
@@ -119,7 +133,7 @@ program
   });
 
 // Setup wizard
-async function runSetup() {
+async function runSetup(): Promise<void> {
   console.clear();
   console.log(chalk.cyan.bold('\n  🔧 Zesbe AI CLI Setup Wizard\n'));
   console.log(chalk.gray('  Configure your AI providers and preferences.\n'));
@@ -129,7 +143,7 @@ async function runSetup() {
     output: process.stdout
   });
 
-  const question = (q) => new Promise((resolve) => {
+  const question = (q: string): Promise<string> => new Promise((resolve) => {
     rl.question(q, resolve);
   });
 
@@ -174,14 +188,14 @@ async function runSetup() {
   }
 
   // Choose default model
-  const providerConfig = config.providers[selectedProvider];
-  if (providerConfig && providerConfig.models) {
+  const providerConfigItem = config.providers[selectedProvider];
+  if (providerConfigItem && providerConfigItem.models) {
     console.log(chalk.white(`  Available models for ${selectedProvider}:`));
-    providerConfig.models.forEach((m, i) => {
+    providerConfigItem.models.forEach((m: string, i: number) => {
       console.log(chalk.gray(`    ${i + 1}) ${m}`));
     });
-    const modelChoice = await question(chalk.cyan(`  Select default model [1-${providerConfig.models.length}, default: 1]: `));
-    config.model = providerConfig.models[parseInt(modelChoice) - 1] || providerConfig.models[0];
+    const modelChoice = await question(chalk.cyan(`  Select default model [1-${providerConfigItem.models.length}, default: 1]: `));
+    config.model = providerConfigItem.models[parseInt(modelChoice) - 1] || providerConfigItem.models[0];
     console.log(chalk.green(`  ✓ Default model: ${config.model}\n`));
   }
 
@@ -191,7 +205,6 @@ async function runSetup() {
   console.log(chalk.green(`  ✓ YOLO mode: ${config.yolo ? 'ON' : 'OFF'}\n`));
 
   // Save config
-  const { saveConfig } = await import('./config.js');
   saveConfig(config);
 
   console.log(chalk.green.bold('  ✓ Setup complete!\n'));
