@@ -3,15 +3,8 @@ import { getAllTools, executeTool } from './tools/index.js';
 import { getSkillsManager } from './skills/manager.js';
 import fs from 'fs';
 import path from 'path';
-import type {
-  AgentOptions,
-  AgentStats,
-  Message,
-  ChatCallbacks,
-  Session
-} from './types/index';
 
-const DEFAULT_SYSTEM_PROMPT = \`You are a helpful AI coding assistant running in a CLI environment.
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
 - bash: Execute shell commands
 - read: Read file contents
@@ -22,7 +15,7 @@ You have access to tools to help accomplish tasks:
 
 When the user asks you to perform tasks, use the appropriate tools.
 Always explain what you're doing before using tools.
-Be concise and helpful.\`;
+Be concise and helpful.`;
 
 // Load project context from ZESBE.md, CLAUDE.md, or GEMINI.md
 function loadProjectContext(cwd: string = process.cwd()): { file: string; content: string } | null {
@@ -53,11 +46,10 @@ function ensureSessionDir(): void {
 
 function getSessionPath(name: string = 'last'): string {
   ensureSessionDir();
-  return path.join(SESSION_DIR, \`\${name}.json\`);
+  return path.join(SESSION_DIR, `${name}.json`);
 }
 
 export class Agent {
-  // Public properties
   provider: string;
   model: string;
   yolo: boolean;
@@ -68,8 +60,6 @@ export class Agent {
   projectContext: { file: string; content: string } | null;
   systemPrompt: string;
   client: OpenAI;
-
-  // Private properties
   private _apiKey?: string;
   private _baseUrl?: string;
   private _baseSystemPrompt: string;
@@ -100,17 +90,11 @@ export class Agent {
     // Store base system prompt
     this._baseSystemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     
-    // Initialize systemPrompt
-    this.systemPrompt = '';
-    
     // Build full system prompt
     this._buildSystemPrompt();
 
-    // Initialize OpenAI client
-    this.client = new OpenAI({
-      apiKey: this._apiKey,
-      baseURL: this._baseUrl
-    });
+    // Initialize OpenAI client (works with any OpenAI-compatible API)
+    this._initClient();
   }
 
   // Build system prompt with project context and skills
@@ -119,7 +103,7 @@ export class Agent {
     
     // Add project context
     if (this.projectContext) {
-      systemPrompt += \`\\n\\n## Project Context (from \${this.projectContext.file}):\\n\${this.projectContext.content}\`;
+      systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
     }
     
     // Add loaded skills
@@ -145,19 +129,13 @@ export class Agent {
   }
 
   // Getters and setters to reinitialize client when config changes
-  get apiKey(): string | undefined {
-    return this._apiKey;
-  }
-
+  get apiKey(): string | undefined { return this._apiKey; }
   set apiKey(value: string | undefined) {
     this._apiKey = value;
     this._initClient();
   }
 
-  get baseUrl(): string | undefined {
-    return this._baseUrl;
-  }
-
+  get baseUrl(): string | undefined { return this._baseUrl; }
   set baseUrl(value: string | undefined) {
     this._baseUrl = value;
     this._initClient();
@@ -243,7 +221,7 @@ export class Agent {
             summary
           };
         })
-        .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+        .sort((a, b) => b.modified - a.modified);
       return files;
     } catch (e) {
       return [];
@@ -253,117 +231,19 @@ export class Agent {
   // Limit history to prevent token overflow
   trimHistory(maxMessages: number = 20): void {
     if (this.history.length > maxMessages) {
+      // Keep system context and recent messages
       this.history = this.history.slice(-maxMessages);
     }
   }
 
-  // Note: chat() and continueAfterTools() methods use 'any' for OpenAI response types
-  // as the OpenAI SDK types are complex. This is acceptable for now.
-  
-  async chat(userMessage: string, callbacks: ChatCallbacks = {}): Promise<void> {
-    const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
-
-    this.history.push({ role: 'user', content: userMessage });
-    this.trimHistory();
-
-    try {
-      const messages: Message[] = [
-        { role: 'system', content: this.systemPrompt },
-        ...this.history
-      ];
-
-      if (onStart) onStart();
-
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: messages as any,
-        tools: getAllTools() as any,
-        tool_choice: 'auto',
-        stream: this.stream
-      });
-
-      let assistantMessage = '';
-      let toolCalls: any[] = [];
-
-      if (this.stream) {
-        for await (const chunk of response as any) {
-          const delta = chunk.choices[0]?.delta;
-          if (delta?.content) {
-            assistantMessage += delta.content;
-            if (onToken) onToken(delta.content);
-          }
-          if (delta?.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              if (tc.index !== undefined) {
-                if (!toolCalls[tc.index]) {
-                  toolCalls[tc.index] = {
-                    id: tc.id || \`call_\${tc.index}\`,
-                    type: 'function',
-                    function: { name: '', arguments: '' }
-                  };
-                }
-                if (tc.function?.name) toolCalls[tc.index].function.name = tc.function.name;
-                if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
-                if (tc.id) toolCalls[tc.index].id = tc.id;
-              }
-            }
-          }
-        }
-      } else {
-        const choice = (response as any).choices[0];
-        assistantMessage = choice.message.content || '';
-        toolCalls = choice.message.tool_calls || [];
-        if (assistantMessage && onToken) onToken(assistantMessage);
-      }
-
-      const historyEntry: any = { role: 'assistant', content: assistantMessage };
-      if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
-      this.history.push(historyEntry);
-
-      if (toolCalls.length > 0) {
-        for (const toolCall of toolCalls) {
-          if (!toolCall.function?.name) continue;
-          const toolName = toolCall.function.name;
-          let toolArgs: Record<string, any> = {};
-          try { toolArgs = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) {}
-
-          let approved = true;
-          if (onToolCall) approved = await onToolCall(toolName, toolArgs);
-
-          if (approved) {
-            const result = await executeTool(toolName, toolArgs);
-            if (onToolResult) onToolResult(toolName, result);
-            this.history.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: typeof result === 'string' ? result : JSON.stringify(result)
-            });
-          } else {
-            this.history.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: 'Tool execution was rejected by user.'
-            });
-          }
-        }
-        await this.continueAfterTools(callbacks);
-        return;
-      }
-
-      if (onEnd) onEnd();
-    } catch (err) {
-      if (onError) onError(err as Error);
-      else throw err;
-    }
-  }
-
+  // Continue after tool calls without adding empty user message
   async continueAfterTools(callbacks: ChatCallbacks = {}): Promise<void> {
     const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
 
     try {
       this.trimHistory();
       
-      const messages: Message[] = [
+      const messages = [
         { role: 'system', content: this.systemPrompt },
         ...this.history
       ];
@@ -372,17 +252,17 @@ export class Agent {
 
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: messages as any,
-        tools: getAllTools() as any,
+        messages,
+        tools: getAllTools(),
         tool_choice: 'auto',
         stream: this.stream
       });
 
       let assistantMessage = '';
-      let toolCalls: any[] = [];
+      let toolCalls = [];
 
       if (this.stream) {
-        for await (const chunk of response as any) {
+        for await (const chunk of response) {
           const delta = chunk.choices[0]?.delta;
           if (delta?.content) {
             assistantMessage += delta.content;
@@ -393,7 +273,7 @@ export class Agent {
               if (tc.index !== undefined) {
                 if (!toolCalls[tc.index]) {
                   toolCalls[tc.index] = {
-                    id: tc.id || \`call_\${tc.index}\`,
+                    id: tc.id || `call_${tc.index}`,
                     type: 'function',
                     function: { name: '', arguments: '' }
                   };
@@ -406,21 +286,22 @@ export class Agent {
           }
         }
       } else {
-        const choice = (response as any).choices[0];
+        const choice = response.choices[0];
         assistantMessage = choice.message.content || '';
         toolCalls = choice.message.tool_calls || [];
         if (assistantMessage && onToken) onToken(assistantMessage);
       }
 
-      const historyEntry: any = { role: 'assistant', content: assistantMessage };
+      const historyEntry = { role: 'assistant', content: assistantMessage };
       if (toolCalls.length > 0) historyEntry.tool_calls = toolCalls;
       this.history.push(historyEntry);
 
+      // Handle more tool calls
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
           if (!toolCall.function?.name) continue;
           const toolName = toolCall.function.name;
-          let toolArgs: Record<string, any> = {};
+          let toolArgs = {};
           try { toolArgs = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) {}
 
           let approved = true;
@@ -448,8 +329,157 @@ export class Agent {
 
       if (onEnd) onEnd();
     } catch (err) {
-      if (onError) onError(err as Error);
+      if (onError) onError(err);
       else throw err;
+    }
+  }
+
+  async chat(userMessage: string, callbacks: ChatCallbacks = {}): Promise<void> {
+    const { onStart, onToken, onToolCall, onToolResult, onEnd, onError } = callbacks;
+
+    // Add user message to history
+    this.history.push({
+      role: 'user',
+      content: userMessage
+    });
+
+    // Trim history to prevent token overflow
+    this.trimHistory();
+
+    try {
+      // Build messages array
+      const messages = [
+        { role: 'system', content: this.systemPrompt },
+        ...this.history
+      ];
+
+      if (onStart) onStart();
+
+      // Make API call with tools
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages,
+        tools: getAllTools(),
+        tool_choice: 'auto',
+        stream: this.stream
+      });
+
+      let assistantMessage = '';
+      let toolCalls = [];
+
+      if (this.stream) {
+        // Handle streaming response
+        for await (const chunk of response) {
+          const delta = chunk.choices[0]?.delta;
+
+          if (delta?.content) {
+            assistantMessage += delta.content;
+            if (onToken) onToken(delta.content);
+          }
+
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.index !== undefined) {
+                if (!toolCalls[tc.index]) {
+                  toolCalls[tc.index] = {
+                    id: tc.id || `call_${tc.index}`,
+                    type: 'function',
+                    function: { name: '', arguments: '' }
+                  };
+                }
+                if (tc.function?.name) {
+                  toolCalls[tc.index].function.name = tc.function.name;
+                }
+                if (tc.function?.arguments) {
+                  toolCalls[tc.index].function.arguments += tc.function.arguments;
+                }
+                if (tc.id) {
+                  toolCalls[tc.index].id = tc.id;
+                }
+              }
+            }
+          }
+        }
+      } else {
+        // Handle non-streaming response
+        const choice = response.choices[0];
+        assistantMessage = choice.message.content || '';
+        toolCalls = choice.message.tool_calls || [];
+
+        if (assistantMessage && onToken) {
+          onToken(assistantMessage);
+        }
+      }
+
+      // Add assistant message to history
+      const historyEntry = {
+        role: 'assistant',
+        content: assistantMessage
+      };
+
+      if (toolCalls.length > 0) {
+        historyEntry.tool_calls = toolCalls;
+      }
+
+      this.history.push(historyEntry);
+
+      // Execute tool calls if any
+      if (toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (!toolCall.function?.name) continue;
+
+          const toolName = toolCall.function.name;
+          let toolArgs = {};
+
+          try {
+            toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+          } catch (e) {
+            toolArgs = {};
+          }
+
+          // Ask for approval
+          let approved = true;
+          if (onToolCall) {
+            approved = await onToolCall(toolName, toolArgs);
+          }
+
+          if (approved) {
+            // Execute the tool
+            const result = await executeTool(toolName, toolArgs);
+
+            if (onToolResult) {
+              onToolResult(toolName, result);
+            }
+
+            // Add tool result to history
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: typeof result === 'string' ? result : JSON.stringify(result)
+            });
+          } else {
+            // Tool was rejected
+            this.history.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'Tool execution was rejected by user.'
+            });
+          }
+        }
+
+        // Continue conversation after tool execution
+        await this.continueAfterTools(callbacks);
+        return;
+      }
+
+      if (onEnd) onEnd();
+
+    } catch (err) {
+      if (onError) {
+        onError(err);
+      } else {
+        throw err;
+      }
     }
   }
 }
