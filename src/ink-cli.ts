@@ -211,9 +211,9 @@ class ChatCLI {
       process.exit(0);
     }
 
-    // Show prompt with hint
-    const hint = chalk.gray(' (/ for commands)');
-    const promptStr = chalk.cyan.bold('❯ ');
+    // Show separator line and prompt like Claude Code
+    console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────────'));
+    const promptStr = chalk.cyan.bold('> ');
 
     if (this.isInteractive) {
       // Interactive mode: use question() for prompt
@@ -510,16 +510,16 @@ class ChatCLI {
   }
 
   /**
-   * Output token with proper formatting for box
+   * Output token with simple formatting (like Claude Code)
    */
-  private outputToken(token: string): void {
-    // Handle newlines in response to maintain box formatting
+  private outputTokenSimple(token: string): void {
+    // Handle newlines with proper indentation
     if (token.includes('\n')) {
       const parts = token.split('\n');
       parts.forEach((part, i) => {
         process.stdout.write(part);
         if (i < parts.length - 1) {
-          process.stdout.write('\n' + chalk.green.bold('│') + ' ');
+          process.stdout.write('\n  '); // Indent continuation lines
         }
       });
     } else {
@@ -528,29 +528,11 @@ class ChatCLI {
   }
 
   /**
-   * Format user message box
+   * Format user message - simple inline style like Claude Code
    */
   private formatUserMessage(message: string): void {
-    const maxWidth = Math.min(process.stdout.columns || 60, 60);
-    const lines = message.split('\n');
-    const wrapped: string[] = [];
-
-    // Wrap long lines
-    lines.forEach(line => {
-      while (line.length > maxWidth - 4) {
-        wrapped.push(line.substring(0, maxWidth - 4));
-        line = line.substring(maxWidth - 4);
-      }
-      wrapped.push(line);
-    });
-
-    console.log('');
-    console.log(chalk.blue.bold('╭─ 👤 You ─────────────────────────────────────────────────╮'));
-    wrapped.forEach(line => {
-      const padded = line.padEnd(maxWidth - 4);
-      console.log(chalk.blue.bold('│') + chalk.white(` ${padded} `) + chalk.blue.bold('│'));
-    });
-    console.log(chalk.blue.bold('╰──────────────────────────────────────────────────────────╯'));
+    // Simple inline display - message already shown with prompt
+    // Just add a subtle separator before AI response
     console.log('');
   }
 
@@ -588,8 +570,9 @@ class ChatCLI {
         onStart: () => {
           this.currentSpinner?.stop();
           responseStarted = true;
-          console.log(chalk.green.bold('╭─ 🤖 Assistant ──────────────────────────────────────────╮'));
-          process.stdout.write(chalk.green.bold('│') + ' ');
+          // Claude Code style: bullet point prefix
+          console.log('');
+          process.stdout.write(chalk.green('● '));
         },
         onToken: (token: string) => {
           // Track think block state
@@ -609,7 +592,7 @@ class ChatCLI {
             if (afterThink) {
               fullResponse += afterThink;
               tokens++;
-              this.outputToken(afterThink);
+              this.outputTokenSimple(afterThink);
             }
             return;
           }
@@ -626,36 +609,32 @@ class ChatCLI {
 
           fullResponse += token;
           tokens++;
-          this.outputToken(token);
+          this.outputTokenSimple(token);
         },
         onToolCall: async (tool: string, args: Record<string, unknown>) => {
-          // Show tool call on new line with nice indicator
-          if (responseStarted) {
-            process.stdout.write('\n' + chalk.green.bold('│') + '\n');
-          }
+          // Claude Code style: bullet point for tool
+          console.log('');
           const icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
-          const argsStr = JSON.stringify(args).substring(0, 50);
+          const argsStr = Object.entries(args)
+            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.substring(0, 30) : v}`)
+            .join(', ')
+            .substring(0, 50);
           this.currentSpinner = ora({
-            text: `${icon} ${chalk.cyan.bold(tool)}${chalk.gray('(' + argsStr + '...)')}`,
+            text: `${chalk.yellow(tool)}(${chalk.gray(argsStr)})`,
             spinner: 'dots',
-            color: 'cyan'
+            color: 'yellow',
+            prefixText: chalk.green('●')
           }).start();
           return true;
         },
         onToolResult: (tool: string, result: unknown) => {
-          const icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
-          this.currentSpinner?.succeed(`${icon} ${chalk.cyan(tool)} ${chalk.green('✓')}`);
+          this.currentSpinner?.stopAndPersist({
+            symbol: chalk.green('●'),
+            text: `${chalk.cyan(tool)} ${chalk.gray('completed')}`
+          });
           this.currentSpinner = null;
-          if (responseStarted) {
-            console.log(chalk.green.bold('│'));
-            process.stdout.write(chalk.green.bold('│') + ' ');
-          }
         },
         onEnd: () => {
-          if (responseStarted) {
-            console.log('');
-            console.log(chalk.green.bold('╰──────────────────────────────────────────────────────────╯'));
-          }
           this.state.totalTokens += tokens;
           this.state.lastResponse = fullResponse;
 
@@ -663,8 +642,7 @@ class ChatCLI {
             this.state.messages.push({ role: 'assistant', content: fullResponse, tokens });
           }
 
-          // Show stats in a nice format
-          console.log(chalk.gray(`  📊 ${tokens} tokens • ${this.agent.model}`));
+          // Simple newline to separate
           console.log('');
         },
         onError: (err: Error) => {
