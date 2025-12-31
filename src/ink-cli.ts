@@ -513,27 +513,30 @@ class ChatCLI {
    * Output token with simple formatting (like Claude Code)
    */
   private outputTokenSimple(token: string): void {
-    // Handle newlines with proper indentation
+    // Handle newlines with proper indentation like Claude Code
     if (token.includes('\n')) {
       const parts = token.split('\n');
       parts.forEach((part, i) => {
         process.stdout.write(part);
         if (i < parts.length - 1) {
-          process.stdout.write('\n  '); // Indent continuation lines
+          process.stdout.write('\n  '); // Indent continuation with 2 spaces
         }
       });
     } else {
-      process.stdout.write(token);
+      // Skip leading newlines to keep bullet connected to text
+      const trimmedStart = token.replace(/^\n+/, '');
+      if (trimmedStart) {
+        process.stdout.write(trimmedStart);
+      }
     }
   }
 
   /**
-   * Format user message - simple inline style like Claude Code
+   * Format user message - Claude Code style with separator after
    */
   private formatUserMessage(message: string): void {
-    // Simple inline display - message already shown with prompt
-    // Just add a subtle separator before AI response
-    console.log('');
+    // Add separator after user input like Claude Code
+    console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────────'));
   }
 
   /**
@@ -548,14 +551,13 @@ class ChatCLI {
     // Add to state
     this.state.messages.push({ role: 'user', content: message });
 
-    // Start thinking indicator with custom spinner
+    // Start spinner only (like Claude Code - minimal)
     this.currentSpinner = ora({
-      text: chalk.yellow('🧠 Thinking...'),
-      spinner: {
-        interval: 120,
-        frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-      },
-      color: 'yellow'
+      text: '',
+      spinner: 'dots',
+      color: 'yellow',
+      stream: process.stdout,
+      discardStdin: false
     }).start();
 
     try {
@@ -570,8 +572,7 @@ class ChatCLI {
         onStart: () => {
           this.currentSpinner?.stop();
           responseStarted = true;
-          // Claude Code style: bullet point prefix
-          console.log('');
+          // Claude Code style: bullet point directly followed by text
           process.stdout.write(chalk.green('● '));
         },
         onToken: (token: string) => {
@@ -587,12 +588,13 @@ class ChatCLI {
           if (thinkBuffer.includes('</think>')) {
             inThinkBlock = false;
             const afterThink = thinkBuffer.split('</think>').pop() || '';
-            thinkBuffer = afterThink;
-            // Output the part after </think> if any
-            if (afterThink) {
-              fullResponse += afterThink;
+            thinkBuffer = '';
+            // Output the part after </think> if any (trim leading whitespace)
+            const trimmed = afterThink.replace(/^[\s\n]+/, '');
+            if (trimmed) {
+              fullResponse += trimmed;
               tokens++;
-              this.outputTokenSimple(afterThink);
+              this.outputTokenSimple(trimmed);
             }
             return;
           }
