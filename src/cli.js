@@ -3,14 +3,72 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { showGoodbye } from './ui/welcome.js';
 
+// Filter out <think>...</think> tags from streaming output
+class ThinkingFilter {
+  constructor() {
+    this.buffer = '';
+    this.inThinking = false;
+  }
+
+  process(token) {
+    this.buffer += token;
+    let output = '';
+
+    // Check for opening tag
+    while (this.buffer.includes('<think>')) {
+      const start = this.buffer.indexOf('<think>');
+      output += this.buffer.substring(0, start);
+      this.buffer = this.buffer.substring(start + 7);
+      this.inThinking = true;
+    }
+
+    // Check for closing tag
+    while (this.inThinking && this.buffer.includes('</think>')) {
+      const end = this.buffer.indexOf('</think>');
+      this.buffer = this.buffer.substring(end + 8);
+      this.inThinking = false;
+    }
+
+    // If not in thinking mode and no pending tags
+    if (!this.inThinking && !this.buffer.includes('<')) {
+      output += this.buffer;
+      this.buffer = '';
+    } else if (!this.inThinking && this.buffer.length > 20) {
+      // Flush buffer if it's getting too long and no tag started
+      if (!this.buffer.includes('<')) {
+        output += this.buffer;
+        this.buffer = '';
+      }
+    }
+
+    return output;
+  }
+
+  flush() {
+    const remaining = this.inThinking ? '' : this.buffer;
+    this.buffer = '';
+    this.inThinking = false;
+    return remaining;
+  }
+}
+
 export async function startInteractiveMode(agent, initialPrompt) {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
+    terminal: true
   });
 
+  // Show input prompt like Claude CLI
+  const showPrompt = () => {
+    process.stdout.write('\n');
+    process.stdout.write(chalk.cyan('╭─ ') + chalk.gray('You') + '\n');
+    process.stdout.write(chalk.cyan('╰─➤ '));
+  };
+
   const prompt = () => {
-    rl.question(chalk.green('> '), async (input) => {
+    showPrompt();
+    rl.question('', async (input) => {
       input = input.trim();
 
       // Handle special commands
@@ -70,19 +128,30 @@ export async function startInteractiveMode(agent, initialPrompt) {
       }
 
       // Process user input
+      console.log('');
       const spinner = ora({
-        text: 'Thinking...',
-        color: 'cyan'
+        text: chalk.gray('Thinking...'),
+        color: 'cyan',
+        spinner: 'dots'
       }).start();
+
+      const filter = new ThinkingFilter();
 
       try {
         await agent.chat(input, {
           onStart: () => {
             spinner.stop();
-            console.log(chalk.cyan('\n  📝 Assistant:\n'));
+            console.log(chalk.magenta('╭─ ') + chalk.gray('Assistant'));
+            console.log(chalk.magenta('│'));
+            process.stdout.write(chalk.magenta('│  '));
           },
           onToken: (token) => {
-            process.stdout.write(token);
+            // Filter thinking and handle newlines
+            const filtered = filter.process(token);
+            if (filtered) {
+              const formatted = filtered.replace(/\n/g, '\n' + chalk.magenta('│  '));
+              process.stdout.write(formatted);
+            }
           },
           onToolCall: async (tool, args) => {
             console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
@@ -102,16 +171,18 @@ export async function startInteractiveMode(agent, initialPrompt) {
             }
           },
           onEnd: () => {
-            console.log('\n');
+            console.log('\n' + chalk.magenta('╰─────────────────'));
           },
           onError: (err) => {
             spinner.stop();
-            console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
+            console.log(chalk.magenta('│'));
+            console.log(chalk.magenta('│  ') + chalk.red(`✗ Error: ${err.message}`));
+            console.log(chalk.magenta('╰─────────────────'));
           }
         });
       } catch (err) {
         spinner.stop();
-        console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
+        console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
       }
 
       prompt();
@@ -120,37 +191,49 @@ export async function startInteractiveMode(agent, initialPrompt) {
 
   // Handle initial prompt
   if (initialPrompt) {
-    console.log(chalk.green(`> ${initialPrompt}`));
+    console.log(chalk.cyan('╭─ ') + chalk.gray('You'));
+    console.log(chalk.cyan('╰─➤ ') + initialPrompt);
+    console.log('');
+
     const spinner = ora({
-      text: 'Thinking...',
-      color: 'cyan'
+      text: chalk.gray('Thinking...'),
+      color: 'cyan',
+      spinner: 'dots'
     }).start();
+
+    const filter = new ThinkingFilter();
 
     try {
       await agent.chat(initialPrompt, {
         onStart: () => {
           spinner.stop();
-          console.log(chalk.cyan('\n  📝 Assistant:\n'));
+          console.log(chalk.magenta('╭─ ') + chalk.gray('Assistant'));
+          console.log(chalk.magenta('│'));
+          process.stdout.write(chalk.magenta('│  '));
         },
         onToken: (token) => {
-          process.stdout.write(token);
+          const filtered = filter.process(token);
+          if (filtered) {
+            const formatted = filtered.replace(/\n/g, '\n' + chalk.magenta('│  '));
+            process.stdout.write(formatted);
+          }
         },
         onToolCall: async (tool, args) => {
-          console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
+          console.log(chalk.yellow(`\n${chalk.magenta('│')}\n${chalk.magenta('│')}  🔧 Tool: ${tool}`));
           if (!agent.yolo) {
             const approved = await askApproval(rl);
             return approved;
           }
-          console.log(chalk.green('  ✓ Auto-approved'));
+          console.log(chalk.magenta('│  ') + chalk.green('✓ Auto-approved'));
           return true;
         },
         onEnd: () => {
-          console.log('\n');
+          console.log('\n' + chalk.magenta('╰─────────────────'));
         }
       });
     } catch (err) {
       spinner.stop();
-      console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
+      console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
     }
 
     // Exit after one-shot prompt (non-interactive)
