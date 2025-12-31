@@ -1,6 +1,7 @@
 import readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
+import { showGoodbye } from './ui/welcome.js';
 
 export async function startInteractiveMode(agent, initialPrompt) {
   const rl = readline.createInterface({
@@ -9,12 +10,12 @@ export async function startInteractiveMode(agent, initialPrompt) {
   });
 
   const prompt = () => {
-    rl.question(chalk.green('\n> '), async (input) => {
+    rl.question(chalk.green('> '), async (input) => {
       input = input.trim();
 
       // Handle special commands
       if (input === '/exit' || input === '/quit' || input === '/q') {
-        console.log(chalk.blue('\nGoodbye! 👋\n'));
+        showGoodbye();
         rl.close();
         process.exit(0);
       }
@@ -27,7 +28,7 @@ export async function startInteractiveMode(agent, initialPrompt) {
 
       if (input === '/clear' || input === '/c') {
         agent.clearHistory();
-        console.log(chalk.gray('Conversation cleared.'));
+        console.log(chalk.gray('  ✓ Conversation cleared.\n'));
         prompt();
         return;
       }
@@ -39,7 +40,7 @@ export async function startInteractiveMode(agent, initialPrompt) {
       }
 
       if (input === '/model') {
-        console.log(chalk.gray(`Current model: ${agent.model}`));
+        console.log(chalk.cyan(`  Current model: ${agent.model}\n`));
         prompt();
         return;
       }
@@ -47,7 +48,18 @@ export async function startInteractiveMode(agent, initialPrompt) {
       if (input.startsWith('/model ')) {
         const newModel = input.replace('/model ', '').trim();
         agent.model = newModel;
-        console.log(chalk.green(`Model changed to: ${newModel}`));
+        console.log(chalk.green(`  ✓ Model changed to: ${newModel}\n`));
+        prompt();
+        return;
+      }
+
+      if (input === '/yolo') {
+        agent.yolo = !agent.yolo;
+        if (agent.yolo) {
+          console.log(chalk.yellow('  ⏵⏵ bypass permissions ON\n'));
+        } else {
+          console.log(chalk.gray('  ⏵⏵ bypass permissions OFF\n'));
+        }
         prompt();
         return;
       }
@@ -58,31 +70,35 @@ export async function startInteractiveMode(agent, initialPrompt) {
       }
 
       // Process user input
-      const spinner = ora('Thinking...').start();
+      const spinner = ora({
+        text: 'Thinking...',
+        color: 'cyan'
+      }).start();
 
       try {
         await agent.chat(input, {
           onStart: () => {
             spinner.stop();
-            console.log(chalk.cyan('\n📝 Assistant:\n'));
+            console.log(chalk.cyan('\n  📝 Assistant:\n'));
           },
           onToken: (token) => {
             process.stdout.write(token);
           },
           onToolCall: async (tool, args) => {
-            console.log(chalk.yellow(`\n\n🔧 Using tool: ${tool}`));
-            console.log(chalk.gray(JSON.stringify(args, null, 2)));
+            console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
+            console.log(chalk.gray('  ' + JSON.stringify(args, null, 2).replace(/\n/g, '\n  ')));
 
             if (!agent.yolo) {
               const approved = await askApproval(rl);
               return approved;
             }
+            console.log(chalk.green('  ✓ Auto-approved (YOLO mode)'));
             return true;
           },
           onToolResult: (tool, result) => {
-            console.log(chalk.green(`\n✓ ${tool} completed`));
-            if (result && result.length < 500) {
-              console.log(chalk.gray(result));
+            console.log(chalk.green(`  ✓ ${tool} completed`));
+            if (result && result.length < 300) {
+              console.log(chalk.gray('  ' + result.substring(0, 300)));
             }
           },
           onEnd: () => {
@@ -90,12 +106,12 @@ export async function startInteractiveMode(agent, initialPrompt) {
           },
           onError: (err) => {
             spinner.stop();
-            console.error(chalk.red(`\nError: ${err.message}`));
+            console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
           }
         });
       } catch (err) {
         spinner.stop();
-        console.error(chalk.red(`\nError: ${err.message}`));
+        console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
       }
 
       prompt();
@@ -105,23 +121,27 @@ export async function startInteractiveMode(agent, initialPrompt) {
   // Handle initial prompt
   if (initialPrompt) {
     console.log(chalk.green(`> ${initialPrompt}`));
-    const spinner = ora('Thinking...').start();
+    const spinner = ora({
+      text: 'Thinking...',
+      color: 'cyan'
+    }).start();
 
     try {
       await agent.chat(initialPrompt, {
         onStart: () => {
           spinner.stop();
-          console.log(chalk.cyan('\n📝 Assistant:\n'));
+          console.log(chalk.cyan('\n  📝 Assistant:\n'));
         },
         onToken: (token) => {
           process.stdout.write(token);
         },
         onToolCall: async (tool, args) => {
-          console.log(chalk.yellow(`\n\n🔧 Using tool: ${tool}`));
+          console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
           if (!agent.yolo) {
             const approved = await askApproval(rl);
             return approved;
           }
+          console.log(chalk.green('  ✓ Auto-approved'));
           return true;
         },
         onEnd: () => {
@@ -130,7 +150,7 @@ export async function startInteractiveMode(agent, initialPrompt) {
       });
     } catch (err) {
       spinner.stop();
-      console.error(chalk.red(`\nError: ${err.message}`));
+      console.error(chalk.red(`\n  ✗ Error: ${err.message}\n`));
     }
 
     // Exit after one-shot prompt (non-interactive)
@@ -141,35 +161,35 @@ export async function startInteractiveMode(agent, initialPrompt) {
   }
 
   // Start interactive loop
-  showHelp();
   prompt();
 }
 
 function showHelp() {
-  console.log(chalk.blue('\n📚 Commands:'));
-  console.log(chalk.gray('  /help, /h     - Show this help'));
-  console.log(chalk.gray('  /clear, /c    - Clear conversation history'));
-  console.log(chalk.gray('  /tools        - List available tools'));
-  console.log(chalk.gray('  /model        - Show current model'));
-  console.log(chalk.gray('  /model <name> - Change model'));
-  console.log(chalk.gray('  /exit, /q     - Exit'));
+  console.log(chalk.cyan('\n  📚 Commands:\n'));
+  console.log(chalk.white('  /help, /h      ') + chalk.gray('Show this help'));
+  console.log(chalk.white('  /clear, /c     ') + chalk.gray('Clear conversation history'));
+  console.log(chalk.white('  /tools         ') + chalk.gray('List available tools'));
+  console.log(chalk.white('  /model         ') + chalk.gray('Show current model'));
+  console.log(chalk.white('  /model <name>  ') + chalk.gray('Change model'));
+  console.log(chalk.white('  /yolo          ') + chalk.gray('Toggle bypass permissions'));
+  console.log(chalk.white('  /exit, /q      ') + chalk.gray('Exit'));
   console.log('');
 }
 
 function showTools() {
-  console.log(chalk.blue('\n🔧 Available Tools:'));
-  console.log(chalk.gray('  • bash     - Execute shell commands'));
-  console.log(chalk.gray('  • read     - Read file contents'));
-  console.log(chalk.gray('  • write    - Write to files'));
-  console.log(chalk.gray('  • edit     - Edit files (search & replace)'));
-  console.log(chalk.gray('  • glob     - Find files by pattern'));
-  console.log(chalk.gray('  • grep     - Search in files'));
+  console.log(chalk.cyan('\n  🔧 Available Tools:\n'));
+  console.log(chalk.white('  bash     ') + chalk.gray('Execute shell commands'));
+  console.log(chalk.white('  read     ') + chalk.gray('Read file contents'));
+  console.log(chalk.white('  write    ') + chalk.gray('Write to files'));
+  console.log(chalk.white('  edit     ') + chalk.gray('Edit files (search & replace)'));
+  console.log(chalk.white('  glob     ') + chalk.gray('Find files by pattern'));
+  console.log(chalk.white('  grep     ') + chalk.gray('Search in files'));
   console.log('');
 }
 
 function askApproval(rl) {
   return new Promise((resolve) => {
-    rl.question(chalk.yellow('\nApprove? [y/N]: '), (answer) => {
+    rl.question(chalk.yellow('\n  Approve? [y/N]: '), (answer) => {
       resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
     });
   });

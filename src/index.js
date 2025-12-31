@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import dotenv from 'dotenv';
 import { startInteractiveMode } from './cli.js';
 import { Agent } from './agent.js';
+import { showWelcome } from './ui/welcome.js';
 
 dotenv.config();
 
@@ -14,17 +15,16 @@ program
   .name('my-ai')
   .description('Custom AI CLI Agent - Like Claude Code but with your own model')
   .version('1.0.0')
-  .option('-m, --model <model>', 'Model to use (default: gpt-4o)', 'gpt-4o')
+  .option('-m, --model <model>', 'Model to use', 'gpt-4o')
   .option('-p, --provider <provider>', 'Provider: openai, anthropic, ollama, custom', 'openai')
   .option('-b, --base-url <url>', 'Custom API base URL')
   .option('-k, --api-key <key>', 'API key (or use env var)')
   .option('-s, --system <prompt>', 'Custom system prompt')
   .option('-y, --yolo', 'Auto-approve all actions (bypass permissions)')
+  .option('-q, --quiet', 'Skip welcome screen')
   .option('--no-stream', 'Disable streaming output')
   .argument('[prompt...]', 'Initial prompt')
   .action(async (promptArgs, options) => {
-    console.log(chalk.blue.bold('\n🤖 My AI CLI Agent\n'));
-
     // Get API key from options or environment
     let apiKey = options.apiKey;
     let baseUrl = options.baseUrl;
@@ -56,14 +56,15 @@ program
       process.exit(1);
     }
 
-    // Show config
-    console.log(chalk.gray(`Provider: ${options.provider}`));
-    console.log(chalk.gray(`Model: ${options.model}`));
-    console.log(chalk.gray(`Base URL: ${baseUrl}`));
-    if (options.yolo) {
-      console.log(chalk.yellow('⚠️  YOLO mode enabled - auto-approving all actions'));
+    // Show welcome screen
+    if (!options.quiet) {
+      console.clear();
+      showWelcome({
+        model: options.model,
+        provider: options.provider,
+        yolo: options.yolo
+      });
     }
-    console.log('');
 
     // Create agent
     const agent = new Agent({
