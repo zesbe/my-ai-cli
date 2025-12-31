@@ -5,6 +5,7 @@ import Spinner from 'ink-spinner';
 import SelectInput from 'ink-select-input';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
+import { getMCPManager } from './mcp/client.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -56,6 +57,7 @@ const SLASH_COMMANDS = [
   { value: '/context', label: '/context', description: '📄 Show project context' },
   { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve' },
   { value: '/config', label: '/config', description: 'Show configuration' },
+  { value: '/mcp', label: '/mcp', description: '🔌 MCP server management' },
   { value: '/exit', label: '/exit', description: 'Exit CLI' },
 ];
 
@@ -500,6 +502,13 @@ const ChatApp = ({ agent, initialPrompt }) => {
 
 🛠️ TOOLS (AI can use):
   bash, read, write, edit, glob, grep, web_fetch
+  + MCP tools from connected servers
+
+🔌 MCP (Model Context Protocol):
+  /mcp              List connected servers
+  /mcp connect      Connect to configured servers
+  /mcp disconnect   Disconnect all
+  /mcp tools        List MCP tools
 
 📄 PROJECT CONTEXT:
   Create ZESBE.md in project root for custom instructions
@@ -665,6 +674,65 @@ Create one of these files in your project root:
             `• ${s.name} (${new Date(s.modified).toLocaleDateString()})\n  ${s.summary}`
           ).join('\n');
           addMessage('system', `📚 SAVED SESSIONS:\n\n${list}\n\nUse /load <name> to load a session`);
+        }
+        break;
+
+      case '/mcp':
+        const mcpManager = getMCPManager();
+        const mcpCmd = args.split(' ')[0];
+        const mcpArgs = args.split(' ').slice(1).join(' ');
+        
+        if (mcpCmd === 'list' || !mcpCmd) {
+          const servers = mcpManager.listServers();
+          if (servers.length === 0) {
+            addMessage('system', `🔌 MCP: No servers connected.
+
+To configure MCP servers, edit:
+~/.zesbe/mcp.json
+
+Example config:
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "~/"]
+    }
+  }
+}
+
+Then run: /mcp connect`);
+          } else {
+            const list = servers.map(s => 
+              `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
+            ).join('\n');
+            addMessage('system', `🔌 MCP SERVERS:\n\n${list}`);
+          }
+        } else if (mcpCmd === 'connect') {
+          addMessage('system', '🔌 Connecting to MCP servers...');
+          const results = await mcpManager.connectAll();
+          const summary = results.map(r => 
+            r.success ? `✅ ${r.name}: ${r.tools.length} tools` : `❌ ${r.name}: ${r.error}`
+          ).join('\n');
+          addMessage('system', `MCP Connection Results:\n${summary || 'No servers configured'}`);
+        } else if (mcpCmd === 'disconnect') {
+          await mcpManager.disconnectAll();
+          addMessage('success', 'Disconnected from all MCP servers');
+        } else if (mcpCmd === 'tools') {
+          const tools = mcpManager.getToolsForAI();
+          if (tools.length === 0) {
+            addMessage('system', 'No MCP tools available. Run /mcp connect first.');
+          } else {
+            const list = tools.map(t => `• ${t.function.name}`).join('\n');
+            addMessage('system', `🔧 MCP TOOLS:\n\n${list}`);
+          }
+        } else {
+          addMessage('system', `🔌 MCP Commands:
+  /mcp              List connected servers
+  /mcp connect      Connect to all configured servers
+  /mcp disconnect   Disconnect from all servers
+  /mcp tools        List available MCP tools
+
+Config file: ~/.zesbe/mcp.json`);
         }
         break;
 

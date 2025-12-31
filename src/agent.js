@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { tools, executeTool } from './tools/index.js';
+import { getAllTools, executeTool } from './tools/index.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -215,7 +215,7 @@ export class Agent {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages,
-        tools: tools,
+        tools: getAllTools(),
         tool_choice: 'auto',
         stream: this.stream
       });
@@ -321,7 +321,7 @@ export class Agent {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages,
-        tools: tools,
+        tools: getAllTools(),
         tool_choice: 'auto',
         stream: this.stream
       });

@@ -5,9 +5,10 @@ import { editTool, executeEdit } from './edit.js';
 import { globTool, executeGlob } from './glob.js';
 import { grepTool, executeGrep } from './grep.js';
 import { webTool, executeWebFetch } from './web.js';
+import { getMCPManager } from '../mcp/client.js';
 
-// Tool definitions for OpenAI API
-export const tools = [
+// Built-in tool definitions
+export const builtInTools = [
   bashTool,
   readTool,
   writeTool,
@@ -16,6 +17,16 @@ export const tools = [
   grepTool,
   webTool
 ];
+
+// Get all tools (built-in + MCP)
+export function getAllTools() {
+  const mcpManager = getMCPManager();
+  const mcpTools = mcpManager.getToolsForAI();
+  return [...builtInTools, ...mcpTools];
+}
+
+// For backward compatibility
+export const tools = builtInTools;
 
 // Tool executors
 const executors = {
@@ -29,6 +40,17 @@ const executors = {
 };
 
 export async function executeTool(name, args) {
+  // Check if it's an MCP tool
+  if (name.startsWith('mcp_')) {
+    const mcpManager = getMCPManager();
+    try {
+      return await mcpManager.executeTool(name, args);
+    } catch (err) {
+      return `Error executing MCP tool ${name}: ${err.message}`;
+    }
+  }
+
+  // Built-in tool
   const executor = executors[name];
   if (!executor) {
     return `Unknown tool: ${name}`;
