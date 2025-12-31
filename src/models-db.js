@@ -120,15 +120,15 @@ export const PROVIDERS = {
   },
   glm: {
     name: 'GLM (Z.AI)',
-    baseUrl: 'https://api.z.ai/api/paas/v4',
+    baseUrl: 'https://api.z.ai/api/paas/v4/',
     apiKeyEnv: 'GLM_API_KEY',
     apiKeyFile: '.glm_api_key',
     description: 'Chinese GLM models - OpenAI compatible',
     models: [
-      { id: 'glm-4.7', name: 'GLM-4.7', description: 'Latest & best for coding', recommended: true },
-      { id: 'glm-4-plus', name: 'GLM-4 Plus', description: 'Most capable' },
-      { id: 'glm-4-flash', name: 'GLM-4 Flash', description: 'Fast responses' },
-      { id: 'glm-4-air', name: 'GLM-4 Air', description: 'Lightweight & fast' },
+      { id: 'glm-4.7', name: 'GLM-4.7', description: 'Latest & best for coding (200k context)', recommended: true },
+      { id: 'glm-4.6', name: 'GLM-4.6', description: 'Previous flagship model' },
+      { id: 'glm-4.5', name: 'GLM-4.5', description: 'Hybrid reasoning model' },
+      { id: 'glm-4.5-air', name: 'GLM-4.5 Air', description: 'Lightweight & fast' },
     ]
   },
   mistral: {
