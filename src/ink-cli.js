@@ -7,6 +7,7 @@ import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import { getMCPManager } from './mcp/client.js';
 import { getSkillsManager } from './skills/manager.js';
+import { POPULAR_MCP_SERVERS, searchServers, getServerById, generateInstallConfig, MARKETPLACE_LINKS } from './mcp/marketplace.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -511,6 +512,15 @@ const ChatApp = ({ agent, initialPrompt }) => {
   /mcp connect      Connect to configured servers
   /mcp disconnect   Disconnect all
   /mcp tools        List MCP tools
+  /mcp browse       Browse popular MCP servers 🆕
+  /mcp search <q>   Search MCP servers 🆕
+  /mcp install <id> Install MCP server 🆕
+  /mcp marketplace  View online marketplaces 🆕
+
+📚 SKILLS:
+  /skills           List available skills
+  /skills load <id> Load a skill
+  /skills create    Create new skill
 
 📄 PROJECT CONTEXT:
   Create ZESBE.md in project root for custom instructions
@@ -813,12 +823,65 @@ Then run: /mcp connect`);
             const list = tools.map(t => `• ${t.function.name}`).join('\n');
             addMessage('system', `🔧 MCP TOOLS:\n\n${list}`);
           }
+        } else if (mcpCmd === 'browse') {
+          const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s => 
+            `${s.official ? '⭐' : '•'} ${s.id} - ${s.name} by ${s.author}\n   ${s.description}\n   Category: ${s.category} | ⭐ ${s.stars} stars`
+          ).join('\n\n');
+          addMessage('system', `🏪 POPULAR MCP SERVERS:\n\n${list}\n\nUse /mcp install <id> to add a server\nUse /mcp search <query> to search\nUse /mcp marketplace for more`);
+        } else if (mcpCmd === 'search') {
+          if (!mcpArgs) {
+            addMessage('system', 'Usage: /mcp search <query>\n\nExample: /mcp search database');
+            break;
+          }
+          const results = searchServers(mcpArgs);
+          if (results.length === 0) {
+            addMessage('system', `No servers found for "${mcpArgs}"`);
+          } else {
+            const list = results.slice(0, 8).map(s => 
+              `${s.official ? '⭐' : '•'} ${s.id} - ${s.name}\n   ${s.description}`
+            ).join('\n\n');
+            addMessage('system', `🔍 SEARCH RESULTS (${results.length}):\n\n${list}\n\nUse /mcp install <id> to add`);
+          }
+        } else if (mcpCmd === 'install') {
+          if (!mcpArgs) {
+            addMessage('system', 'Usage: /mcp install <server-id>\n\nExample: /mcp install filesystem\n\nSee /mcp browse for available servers');
+            break;
+          }
+          const server = getServerById(mcpArgs);
+          if (!server) {
+            addMessage('error', `Server "${mcpArgs}" not found. Use /mcp browse to see available servers.`);
+            break;
+          }
+
+          addMessage('system', `📦 Installing: ${server.name}\n${server.description}\n`);
+
+          // Check if requires path or token
+          if (server.install.requiresPath) {
+            addMessage('system', `⚠️ This server requires a PATH parameter.\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args).replace('{PATH}', '"/path/to/directory"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+          } else if (server.install.requiresToken) {
+            addMessage('system', `⚠️ This server requires: ${server.install.requiresToken}\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args)},\n      "env": ${JSON.stringify(server.install.env, null, 2).replace('{TOKEN}', '"your-token-here"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+          } else {
+            // Auto-install (no requirements)
+            const config = mcpManager.loadConfig();
+            config.mcpServers[server.id] = generateInstallConfig(server);
+            mcpManager.saveConfig(config);
+            addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
+          }
+        } else if (mcpCmd === 'marketplace') {
+          const list = MARKETPLACE_LINKS.map(m => 
+            `${m.icon} ${m.name}\n   ${m.description}\n   ${m.url}`
+          ).join('\n\n');
+          addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!`);
         } else {
           addMessage('system', `🔌 MCP Commands:
   /mcp              List connected servers
   /mcp connect      Connect to all configured servers
   /mcp disconnect   Disconnect from all servers
   /mcp tools        List available MCP tools
+  /mcp browse       Browse popular MCP servers
+  /mcp search <q>   Search MCP servers
+  /mcp install <id> Install an MCP server
+  /mcp marketplace  View online marketplaces
 
 Config file: ~/.zesbe/mcp.json`);
         }

@@ -1,0 +1,277 @@
+/**
+ * MCP Marketplace - Browse and install MCP servers easily
+ * Integrates with popular MCP registries
+ */
+
+// Popular MCP Servers curated list
+export const POPULAR_MCP_SERVERS = [
+  {
+    id: 'filesystem',
+    name: 'Filesystem',
+    author: '@modelcontextprotocol',
+    description: 'Secure file operations - read, write, edit files with permission controls',
+    category: 'Official',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '{PATH}'],
+      requiresPath: true
+    },
+    stars: 5000,
+    official: true
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    author: '@modelcontextprotocol',
+    description: 'Official GitHub MCP server - manage repos, issues, PRs, search code',
+    category: 'Official',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '{TOKEN}' },
+      requiresToken: 'GitHub Personal Access Token'
+    },
+    stars: 3500,
+    official: true
+  },
+  {
+    id: 'playwright',
+    name: 'Playwright',
+    author: '@microsoft',
+    description: 'Browser automation - interact with web pages, scrape, test',
+    category: 'Browser Automation',
+    install: {
+      command: 'npx',
+      args: ['-y', '@playwright/mcp']
+    },
+    stars: 24721,
+    official: true
+  },
+  {
+    id: 'brave-search',
+    name: 'Brave Search',
+    author: '@brave',
+    description: 'Web search with Brave Search API - web, images, news, local',
+    category: 'Search',
+    install: {
+      command: 'npx',
+      args: ['-y', '@brave/brave-search-mcp'],
+      env: { BRAVE_API_KEY: '{TOKEN}' },
+      requiresToken: 'Brave Search API Key (free at brave.com/search/api)'
+    },
+    stars: 443,
+    official: true
+  },
+  {
+    id: 'postgres',
+    name: 'PostgreSQL',
+    author: '@modelcontextprotocol',
+    description: 'Query and manage PostgreSQL databases',
+    category: 'Database',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-postgres'],
+      env: { DATABASE_URL: '{URL}' },
+      requiresToken: 'PostgreSQL connection URL'
+    },
+    stars: 2000,
+    official: true
+  },
+  {
+    id: 'sqlite',
+    name: 'SQLite',
+    author: '@modelcontextprotocol',
+    description: 'Query SQLite databases - perfect for local data',
+    category: 'Database',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-sqlite', '{PATH}'],
+      requiresPath: true
+    },
+    stars: 1800,
+    official: true
+  },
+  {
+    id: 'puppeteer',
+    name: 'Puppeteer',
+    author: '@modelcontextprotocol',
+    description: 'Browser automation with Puppeteer - screenshots, PDF, scraping',
+    category: 'Browser Automation',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-puppeteer']
+    },
+    stars: 2200,
+    official: true
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    author: '@modelcontextprotocol',
+    description: 'Interact with Slack - send messages, read channels, manage workspace',
+    category: 'Communication',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-slack'],
+      env: { 
+        SLACK_BOT_TOKEN: '{TOKEN}',
+        SLACK_TEAM_ID: '{TEAM_ID}'
+      },
+      requiresToken: 'Slack Bot Token'
+    },
+    stars: 1500,
+    official: true
+  },
+  {
+    id: 'google-drive',
+    name: 'Google Drive',
+    author: '@modelcontextprotocol',
+    description: 'Access Google Drive files and folders',
+    category: 'Cloud Storage',
+    install: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-gdrive']
+    },
+    stars: 1200,
+    official: true
+  },
+  {
+    id: 'mem0',
+    name: 'Mem0',
+    author: '@mem0ai',
+    description: 'Memory layer for AI - store and recall coding preferences',
+    category: 'Knowledge & Memory',
+    install: {
+      command: 'npx',
+      args: ['-y', '@mem0ai/mem0-mcp'],
+      env: { MEM0_API_KEY: '{TOKEN}' },
+      requiresToken: 'Mem0 API Key (free at mem0.ai)'
+    },
+    stars: 545,
+    official: true
+  },
+  {
+    id: 'everart',
+    name: 'Everart',
+    author: '@everartai',
+    description: 'AI image generation - create images from text prompts',
+    category: 'Image & Video',
+    install: {
+      command: 'npx',
+      args: ['-y', '@everartai/mcp'],
+      env: { EVERART_API_KEY: '{TOKEN}' },
+      requiresToken: 'Everart API Key'
+    },
+    stars: 300,
+    official: false
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    author: '@ckreiling',
+    description: 'Access Obsidian vault notes - read, search, create notes',
+    category: 'Note Taking',
+    install: {
+      command: 'npx',
+      args: ['-y', 'obsidian-mcp', '{PATH}'],
+      requiresPath: true
+    },
+    stars: 800,
+    official: false
+  }
+];
+
+// Categories for filtering
+export const MCP_CATEGORIES = [
+  'All',
+  'Official',
+  'Browser Automation',
+  'Database',
+  'Search',
+  'Communication',
+  'Cloud Storage',
+  'Knowledge & Memory',
+  'Image & Video',
+  'Note Taking',
+  'Developer Tools',
+  'API Development'
+];
+
+// Get servers by category
+export function getServersByCategory(category = 'All') {
+  if (category === 'All') return POPULAR_MCP_SERVERS;
+  return POPULAR_MCP_SERVERS.filter(s => s.category === category);
+}
+
+// Search servers
+export function searchServers(query) {
+  const q = query.toLowerCase();
+  return POPULAR_MCP_SERVERS.filter(s => 
+    s.name.toLowerCase().includes(q) ||
+    s.description.toLowerCase().includes(q) ||
+    s.author.toLowerCase().includes(q) ||
+    s.category.toLowerCase().includes(q)
+  );
+}
+
+// Get server by ID
+export function getServerById(id) {
+  return POPULAR_MCP_SERVERS.find(s => s.id === id);
+}
+
+// Generate install config for server
+export function generateInstallConfig(server, options = {}) {
+  const { path: userPath, token, teamId } = options;
+  
+  const config = {
+    command: server.install.command,
+    args: [...server.install.args],
+    env: { ...server.install.env }
+  };
+
+  // Replace placeholders
+  if (server.install.requiresPath && userPath) {
+    config.args = config.args.map(arg => arg.replace('{PATH}', userPath));
+  }
+
+  if (server.install.requiresToken && token) {
+    for (const [key, value] of Object.entries(config.env)) {
+      if (value === '{TOKEN}') {
+        config.env[key] = token;
+      }
+      if (key === 'SLACK_TEAM_ID' && teamId) {
+        config.env.SLACK_TEAM_ID = teamId;
+      }
+    }
+  }
+
+  return config;
+}
+
+// External marketplace links
+export const MARKETPLACE_LINKS = [
+  {
+    name: 'Glama',
+    url: 'https://glama.ai/mcp/servers',
+    description: '13,450+ MCP servers - Most comprehensive',
+    icon: '🌐'
+  },
+  {
+    name: 'MCP Market',
+    url: 'https://mcpmarket.com',
+    description: '18,600+ servers with categories',
+    icon: '🏪'
+  },
+  {
+    name: 'AI Agents List',
+    url: 'https://aiagentslist.com/mcp-servers',
+    description: '593+ curated servers',
+    icon: '📚'
+  },
+  {
+    name: 'Official GitHub',
+    url: 'https://github.com/modelcontextprotocol/servers',
+    description: 'Official MCP servers repository',
+    icon: '⭐'
+  }
+];
