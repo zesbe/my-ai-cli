@@ -61,10 +61,35 @@ const SLASH_COMMANDS = [
 
 const TYPING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const BRAIN_FRAMES = ['🧠', '💭', '💡', '✨'];
+const ASSESS_FRAMES = ['◐', '◓', '◑', '◒'];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Assessing Indicator - shows between user message and AI response
+const AssessingIndicator = ({ agentName = 'Zesbe' }) => {
+  const [frame, setFrame] = useState(0);
+  const [dots, setDots] = useState('');
+  
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % ASSESS_FRAMES.length);
+      setDots(d => d.length >= 3 ? '' : d + '.');
+    }, 200);
+    return () => clearInterval(timer);
+  }, []);
+
+  return h(Box, { 
+    justifyContent: 'center',
+    marginY: 1,
+    paddingX: 2
+  },
+    h(Text, { color: 'yellow' }, ASSESS_FRAMES[frame]),
+    h(Text, { color: 'gray' }, ` ${agentName} is assessing${dots}`),
+    h(Text, { color: 'gray', dimColor: true }, '  (esc to interrupt)')
+  );
+};
 
 // Typing Indicator Component
 const TypingIndicator = ({ type = 'dots' }) => {
@@ -295,6 +320,9 @@ const ChatApp = ({ agent, initialPrompt }) => {
   const tokenBuffer = useRef(0);
   const updateTimer = useRef(null);
 
+  // Abort controller for interrupting requests
+  const abortController = useRef(null);
+
   // Keyboard shortcuts
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
@@ -305,6 +333,16 @@ const ChatApp = ({ agent, initialPrompt }) => {
       setMessages([]);
       agent.clearHistory();
       setTotalTokens(0);
+    }
+    // ESC to interrupt
+    if (key.escape && (isLoading || isTyping)) {
+      if (abortController.current) {
+        abortController.current.abort();
+      }
+      setIsLoading(false);
+      setIsTyping(false);
+      setCurrentResponse('');
+      addMessage('system', '⚠️ Interrupted by user');
     }
   });
 
@@ -693,7 +731,10 @@ Create one of these files in your project root:
         h(Message, { key: `${i}-${msg.role}`, ...msg })
       ),
       
-      // Typing indicator
+      // Assessing indicator (before AI responds)
+      isLoading && h(AssessingIndicator, { agentName: 'Zesbe' }),
+
+      // Typing indicator (while AI is responding)
       isTyping && currentResponse && h(Box, { flexDirection: 'column', marginY: 1 },
         h(Box, { gap: 2 },
           h(Text, { color: 'green', bold: true }, '┌─ Assistant'),
@@ -703,11 +744,6 @@ Create one of these files in your project root:
           h(Text, { color: 'white' }, currentResponse),
           h(Text, { color: 'cyan' }, '▊')
         )
-      ),
-
-      // Loading
-      isLoading && h(Box, { marginY: 1 },
-        h(TypingIndicator, { type: 'brain' })
       )
     ),
 
