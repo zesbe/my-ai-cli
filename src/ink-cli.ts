@@ -1078,18 +1078,14 @@ Config file: ~/.zesbe/mcp.json`);
           onSubmit: handleSubmit,
           placeholder: 'Type message or / for commands...'
         })
+      ),
+      // Compact status line (not redundant box)
+      h(Box, { marginTop: 1, gap: 2 },
+        totalTokens > 0 && h(Text, { color: 'gray', dimColor: true }, `🎯 ${totalTokens} tokens`),
+        responseTime && h(Text, { color: 'gray', dimColor: true }, `⏱️ ${responseTime}`),
+        loadedSkillsCount > 0 && h(Text, { color: 'gray', dimColor: true }, `📚 ${loadedSkillsCount} skills`)
       )
-    ),
-
-    // Status Bar
-    h(StatusBar, {
-      provider: agent.provider,
-      model: agent.model,
-      tokens: totalTokens,
-      responseTime,
-      yolo: agent.yolo,
-      skillsCount: loadedSkillsCount
-    })
+    )
   );
 };
 
