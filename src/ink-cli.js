@@ -118,7 +118,7 @@ const TypingIndicator = ({ type = 'dots' }) => {
 };
 
 // Status Bar Component
-const StatusBar = ({ provider, model, tokens, responseTime, yolo }) => {
+const StatusBar = ({ provider, model, tokens, responseTime, yolo, skillsCount }) => {
   const providerName = PROVIDERS[provider]?.name || provider;
   
   return h(Box, { 
@@ -131,6 +131,7 @@ const StatusBar = ({ provider, model, tokens, responseTime, yolo }) => {
     h(Box, { gap: 2 },
       h(Text, { color: 'cyan', bold: true }, `🤖 ${providerName}`),
       h(Text, { color: 'magenta' }, `📦 ${model}`),
+      skillsCount > 0 && h(Text, { color: 'blue', bold: true }, `📚 ${skillsCount} skill${skillsCount > 1 ? 's' : ''}`),
       yolo && h(Text, { color: 'yellow' }, '⚡ YOLO')
     ),
     h(Box, { gap: 2 },
@@ -318,6 +319,7 @@ const ChatApp = ({ agent, initialPrompt }) => {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
   const startTime = useRef(null);
   
   // Buffered response for smoother rendering (reduce flicker)
@@ -727,10 +729,11 @@ Instructions for AI...`);
           const result = skillsManager.loadSkill(skillArgs);
           if (result.success) {
             agent.refreshSystemPrompt();
+            setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
             if (result.alreadyLoaded) {
               addMessage('system', `Skill "${skillArgs}" already loaded`);
             } else {
-              addMessage('success', `✅ Loaded skill: ${result.skill.name}\n${result.skill.description}`);
+              addMessage('success', `✅ Loaded skill: ${result.skill.name}\n${result.skill.description}\n\n💡 The AI can now use this skill! Try asking:\n"${result.skill.name} help me with..."`);
             }
           } else {
             addMessage('error', `Failed to load skill: ${result.error}`);
@@ -738,6 +741,7 @@ Instructions for AI...`);
         } else if (skillCmd === 'unload' && skillArgs) {
           if (skillsManager.unloadSkill(skillArgs)) {
             agent.refreshSystemPrompt();
+            setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
             addMessage('success', `Unloaded skill: ${skillArgs}`);
           } else {
             addMessage('error', `Skill "${skillArgs}" is not loaded`);
@@ -827,7 +831,7 @@ Then run: /mcp connect`);
           const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s => 
             `${s.official ? '⭐' : '•'} ${s.id} - ${s.name} by ${s.author}\n   ${s.description}\n   Category: ${s.category} | ⭐ ${s.stars} stars`
           ).join('\n\n');
-          addMessage('system', `🏪 POPULAR MCP SERVERS:\n\n${list}\n\nUse /mcp install <id> to add a server\nUse /mcp search <query> to search\nUse /mcp marketplace for more`);
+          addMessage('system', `🏪 POPULAR MCP SERVERS (Curated List):\n\n${list}\n\n📦 QUICK INSTALL:\n  /mcp install playwright    # Browser automation\n  /mcp install github        # GitHub integration\n  /mcp install filesystem    # File operations\n\n🔍 MORE OPTIONS:\n  /mcp search <query>        # Search servers\n  /mcp marketplace           # External marketplaces`);
         } else if (mcpCmd === 'search') {
           if (!mcpArgs) {
             addMessage('system', 'Usage: /mcp search <query>\n\nExample: /mcp search database');
@@ -871,7 +875,7 @@ Then run: /mcp connect`);
           const list = MARKETPLACE_LINKS.map(m => 
             `${m.icon} ${m.name}\n   ${m.description}\n   ${m.url}`
           ).join('\n\n');
-          addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!`);
+          addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!\n\n💡 To install servers from our curated list:\n  /mcp browse        # See popular servers\n  /mcp install <id>  # Install directly`);
         } else {
           addMessage('system', `🔌 MCP Commands:
   /mcp              List connected servers
@@ -1004,7 +1008,8 @@ Config file: ~/.zesbe/mcp.json`);
       model: agent.model,
       tokens: totalTokens,
       responseTime,
-      yolo: agent.yolo
+      yolo: agent.yolo,
+      skillsCount: loadedSkillsCount
     })
   );
 };

@@ -120,12 +120,17 @@ my-ai -p custom -b http://localhost:1234/v1 -k lm-studio -m local-model
 
 | Provider | Models | Base URL |
 |----------|--------|----------|
+| MiniMax 🆓 | minimax-m2.1 (free!) | api.minimax.chat |
 | OpenAI | gpt-4o, gpt-4-turbo, gpt-3.5-turbo | api.openai.com |
 | Anthropic | claude-3-5-sonnet, claude-3-opus | api.anthropic.com |
-| Ollama | llama3, codellama, mistral, etc. | localhost:11434 |
+| Gemini 🆓 | gemini-2.0-flash (free!) | generativelanguage.googleapis.com |
+| Ollama 🆓 | llama3, codellama, mistral, etc. | localhost:11434 |
+| GLM | glm-4-plus, glm-4-flash | open.bigmodel.cn |
 | Custom | Any OpenAI-compatible | Your URL |
 
-## Tools
+🆓 = Free tier available
+
+## Built-in Tools
 
 | Tool | Description |
 |------|-------------|
@@ -135,6 +140,16 @@ my-ai -p custom -b http://localhost:1234/v1 -k lm-studio -m local-model
 | `edit` | Edit files (search & replace) |
 | `glob` | Find files by pattern |
 | `grep` | Search in files |
+| `web_fetch` | Fetch web pages |
+
+Plus **unlimited tools** via MCP servers! Install servers like:
+- **filesystem**: Secure file operations
+- **github**: Manage repos, issues, PRs
+- **playwright**: Browser automation
+- **brave-search**: Web search
+- **postgres/sqlite**: Database queries
+- **slack**: Slack integration
+- And 13,000+ more via marketplaces!
 
 ## Environment Variables
 
@@ -161,24 +176,47 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```
 my-ai-cli/
 ├── package.json
+├── docs/
+│   ├── MCP-MARKETPLACE.md  # MCP server guide
+│   └── SKILLS.md           # Skills system guide
 ├── src/
 │   ├── index.js      # Entry point & CLI parser
-│   ├── cli.js        # Interactive CLI interface
+│   ├── cli.js        # Classic CLI interface
+│   ├── ink-cli.js    # Modern Ink UI
 │   ├── agent.js      # Agent logic & API calls
-│   └── tools/        # Tool implementations
-│       ├── index.js  # Tool registry
-│       ├── bash.js   # Shell execution
-│       ├── read.js   # File reading
-│       ├── write.js  # File writing
-│       ├── edit.js   # File editing
-│       ├── glob.js   # File finding
-│       └── grep.js   # Pattern search
+│   ├── tools/        # Built-in tool implementations
+│   ├── mcp/          # MCP client & marketplace
+│   │   ├── client.js
+│   │   └── marketplace.js
+│   └── skills/       # Skills manager
+│       └── manager.js
 └── README.md
 ```
 
 ## Extending
 
-### Add Custom Tools
+### MCP Servers (Easiest!)
+Add unlimited tools via MCP servers:
+```bash
+/mcp browse              # See available servers
+/mcp install playwright  # Install browser automation
+/mcp install github      # Install GitHub integration
+/mcp connect             # Connect and use!
+```
+
+See [docs/MCP-MARKETPLACE.md](docs/MCP-MARKETPLACE.md) for full guide.
+
+### Skills (Recommended for Workflows)
+Create reusable AI instructions:
+```bash
+/skills create git-workflow  # Create skill template
+# Edit ~/.zesbe/skills/git-workflow/SKILL.md
+/skills load git-workflow    # Load skill
+```
+
+See [docs/SKILLS.md](docs/SKILLS.md) for full guide.
+
+### Custom Built-in Tools (Advanced)
 
 1. Create tool file in `src/tools/`:
 
@@ -212,6 +250,8 @@ export async function executeMyTool(args) {
 ```bash
 my-ai --system "You are a security expert. Focus on finding vulnerabilities."
 ```
+
+Or create a `ZESBE.md` file in your project root with instructions.
 
 ## License
 
