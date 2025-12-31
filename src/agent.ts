@@ -1,6 +1,16 @@
-import OpenAI from 'openai';
-import { getAllTools, executeTool } from './tools/index.js';
+/**
+ * Agent - Powered by Vercel AI SDK
+ * Unified multi-provider API with built-in agentic loop
+ */
+
+import { streamText, generateText, tool, stepCountIs } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { z } from 'zod';
+import { executeTool } from './tools/index.js';
+import type { ToolExecutionOptions } from '@ai-sdk/provider-utils';
 import { getSkillsManager } from './skills/manager.js';
+import { countTokens } from './utils/tokens.js';
 import fs from 'fs';
 import path from 'path';
 import type { AgentOptions, AgentStats, Message, ChatCallbacks, Session, ToolCall } from './types/index.js';
@@ -9,11 +19,7 @@ import type { AgentOptions, AgentStats, Message, ChatCallbacks, Session, ToolCal
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Providers that need special message handling (no native tool support)
-const PROVIDERS_NO_TOOL_MESSAGES = ['glm', 'gemini'];
-
-// Default max steps for agentic loop (like AI SDK's stopWhen)
-const DEFAULT_MAX_STEPS = 20;
+const DEFAULT_MAX_STEPS = 15;
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI coding assistant running in a CLI environment.
 You have access to tools to help accomplish tasks:
@@ -23,16 +29,248 @@ You have access to tools to help accomplish tasks:
 - edit: Edit files using search and replace
 - glob: Find files matching patterns
 - grep: Search for patterns in files
+- git_status, git_diff, git_log, git_commit: Git operations
 
 When the user asks you to perform tasks, use the appropriate tools.
 Always explain what you're doing before using tools.
 Be concise and helpful.`;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PROVIDER FACTORY
+// ═══════════════════════════════════════════════════════════════════════════
+
+type ProviderType = 'openai' | 'anthropic' | 'glm' | 'gemini' | 'groq' | 'together' | 'deepseek' | 'openrouter' | string;
+
+interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+function createModel(provider: ProviderType, model: string, config: ProviderConfig) {
+  const { apiKey, baseUrl } = config;
+
+  switch (provider) {
+    case 'anthropic':
+      return createAnthropic({ apiKey })(model);
+
+    case 'openai':
+      return createOpenAI({ apiKey, baseURL: baseUrl })(model);
+
+    case 'glm':
+      // GLM uses OpenAI-compatible API
+      return createOpenAI({
+        apiKey,
+        baseURL: baseUrl || 'https://api.z.ai/api/coding/paas/v4/'
+      })(model);
+
+    case 'gemini':
+      // Gemini via OpenAI-compatible endpoint
+      return createOpenAI({
+        apiKey,
+        baseURL: baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/'
+      })(model);
+
+    case 'groq':
+      return createOpenAI({
+        apiKey,
+        baseURL: 'https://api.groq.com/openai/v1'
+      })(model);
+
+    case 'together':
+      return createOpenAI({
+        apiKey,
+        baseURL: 'https://api.together.xyz/v1'
+      })(model);
+
+    case 'deepseek':
+      return createOpenAI({
+        apiKey,
+        baseURL: 'https://api.deepseek.com/v1'
+      })(model);
+
+    case 'openrouter':
+      return createOpenAI({
+        apiKey,
+        baseURL: 'https://openrouter.ai/api/v1'
+      })(model);
+
+    default:
+      return createOpenAI({
+        apiKey,
+        baseURL: baseUrl
+      })(model);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI SDK TOOLS - Zod schema validation with execute functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+function createAiSdkTools(onToolCall?: (name: string, args: any) => Promise<boolean>, onToolResult?: (name: string, result: any) => void) {
+  return {
+    bash: tool({
+      description: 'Execute a shell command',
+      inputSchema: z.object({
+        command: z.string().describe('The command to execute'),
+        cwd: z.string().optional().describe('Working directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('bash', args);
+        const result = await executeTool('bash', args);
+        if (onToolResult) onToolResult('bash', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    read: tool({
+      description: 'Read the contents of a file',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file to read'),
+        encoding: z.string().optional().describe('File encoding (default: utf-8)')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('read', args);
+        const result = await executeTool('read', args);
+        if (onToolResult) onToolResult('read', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    write: tool({
+      description: 'Write content to a file',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file to write'),
+        content: z.string().describe('Content to write')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('write', args);
+        const result = await executeTool('write', args);
+        if (onToolResult) onToolResult('write', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    edit: tool({
+      description: 'Edit a file by replacing text',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file to edit'),
+        search: z.string().describe('Text to search for'),
+        replace: z.string().describe('Text to replace with')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('edit', args);
+        const result = await executeTool('edit', args);
+        if (onToolResult) onToolResult('edit', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    glob: tool({
+      description: 'Find files matching a glob pattern',
+      inputSchema: z.object({
+        pattern: z.string().describe('Glob pattern (e.g., **/*.ts)'),
+        cwd: z.string().optional().describe('Base directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('glob', args);
+        const result = await executeTool('glob', args);
+        if (onToolResult) onToolResult('glob', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    grep: tool({
+      description: 'Search for a pattern in files',
+      inputSchema: z.object({
+        pattern: z.string().describe('Search pattern (regex)'),
+        path: z.string().optional().describe('File or directory to search'),
+        include: z.string().optional().describe('File pattern to include')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('grep', args);
+        const result = await executeTool('grep', args);
+        if (onToolResult) onToolResult('grep', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    web_fetch: tool({
+      description: 'Fetch content from a URL',
+      inputSchema: z.object({
+        url: z.string().describe('URL to fetch')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('web_fetch', args);
+        const result = await executeTool('web_fetch', args);
+        if (onToolResult) onToolResult('web_fetch', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    git_status: tool({
+      description: 'Get git repository status',
+      inputSchema: z.object({
+        cwd: z.string().optional().describe('Working directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('git_status', args);
+        const result = await executeTool('git_status', args);
+        if (onToolResult) onToolResult('git_status', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    git_diff: tool({
+      description: 'Show git diff',
+      inputSchema: z.object({
+        staged: z.boolean().optional().describe('Show staged changes only'),
+        file: z.string().optional().describe('Specific file to diff'),
+        cwd: z.string().optional().describe('Working directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('git_diff', args);
+        const result = await executeTool('git_diff', args);
+        if (onToolResult) onToolResult('git_diff', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    git_log: tool({
+      description: 'Show git commit history',
+      inputSchema: z.object({
+        maxCount: z.number().optional().describe('Max commits to show'),
+        file: z.string().optional().describe('File to show history for'),
+        cwd: z.string().optional().describe('Working directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('git_log', args);
+        const result = await executeTool('git_log', args);
+        if (onToolResult) onToolResult('git_log', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    }),
+
+    git_commit: tool({
+      description: 'Create a git commit',
+      inputSchema: z.object({
+        message: z.string().describe('Commit message'),
+        files: z.array(z.string()).optional().describe('Files to commit'),
+        cwd: z.string().optional().describe('Working directory')
+      }),
+      execute: async (args, _options: ToolExecutionOptions) => {
+        if (onToolCall) await onToolCall('git_commit', args);
+        const result = await executeTool('git_commit', args);
+        if (onToolResult) onToolResult('git_commit', result);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    })
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Load project context from ZESBE.md, CLAUDE.md, or GEMINI.md
 function loadProjectContext(cwd: string = process.cwd()): { file: string; content: string } | null {
   const contextFiles = ['ZESBE.md', 'CLAUDE.md', 'GEMINI.md', 'AI.md', '.ai/context.md'];
 
@@ -50,7 +288,6 @@ function loadProjectContext(cwd: string = process.cwd()): { file: string; conten
   return null;
 }
 
-// Session storage directory
 const SESSION_DIR = path.join(process.env.HOME || '~', '.zesbe', 'sessions');
 
 function ensureSessionDir(): void {
@@ -65,14 +302,8 @@ function getSessionPath(name: string = 'last'): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TYPES
+// EXTENDED CALLBACKS
 // ═══════════════════════════════════════════════════════════════════════════
-
-interface StepResult {
-  response: string;
-  toolCalls: ToolCall[];
-  hasToolCalls: boolean;
-}
 
 interface StepFinishInfo {
   stepNumber: number;
@@ -81,21 +312,18 @@ interface StepFinishInfo {
   hasMoreSteps: boolean;
 }
 
-interface ExecuteStepParams {
-  stepNumber: number;
-  onStart?: (() => void) | null;
-  onToken?: (token: string) => void;
-  onToolCall?: (name: string, args: Record<string, any>) => Promise<boolean>;
-  onToolResult?: (name: string, result: string | object) => void;
-}
-
-// Extended callbacks with onStepFinish
 interface ExtendedChatCallbacks extends ChatCallbacks {
   onStepFinish?: (info: StepFinishInfo) => void;
 }
 
+// Message type for AI SDK
+interface AIMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// AGENT CLASS
+// AGENT CLASS - AI SDK Powered
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class Agent {
@@ -109,7 +337,6 @@ export class Agent {
   stats: AgentStats;
   projectContext: { file: string; content: string } | null;
   systemPrompt!: string;
-  client!: OpenAI;
   private _apiKey?: string;
   private _baseUrl?: string;
   private _baseSystemPrompt: string;
@@ -123,11 +350,8 @@ export class Agent {
     this.stream = options.stream !== false;
     this.history = [];
     this.cwd = options.cwd || process.cwd();
-
-    // Agentic loop settings (like AI SDK)
     this.maxSteps = (options as any).maxSteps || DEFAULT_MAX_STEPS;
 
-    // Stats tracking
     this.stats = {
       totalTokens: 0,
       promptTokens: 0,
@@ -137,18 +361,20 @@ export class Agent {
       startTime: Date.now()
     };
 
-    // Load project context
     this.projectContext = loadProjectContext(this.cwd);
-
-    // Store base system prompt
     this._baseSystemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-
-    // Build full system prompt
     this._buildSystemPrompt();
-
-    // Initialize OpenAI client (works with any OpenAI-compatible API)
-    this._initClient();
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GETTERS/SETTERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  get apiKey(): string | undefined { return this._apiKey; }
+  set apiKey(value: string | undefined) { this._apiKey = value; }
+
+  get baseUrl(): string | undefined { return this._baseUrl; }
+  set baseUrl(value: string | undefined) { this._baseUrl = value; }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SYSTEM PROMPT
@@ -157,12 +383,10 @@ export class Agent {
   private _buildSystemPrompt(): void {
     let systemPrompt = this._baseSystemPrompt;
 
-    // Add project context
     if (this.projectContext) {
       systemPrompt += `\n\n## Project Context (from ${this.projectContext.file}):\n${this.projectContext.content}`;
     }
 
-    // Add loaded skills
     const skillsManager = getSkillsManager();
     const skillsContext = skillsManager.getSkillsContext();
     if (skillsContext) {
@@ -177,85 +401,31 @@ export class Agent {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PROVIDER-SPECIFIC MESSAGE FORMATTING
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // Check if current provider supports native tool calling
-  private _supportsTools(): boolean {
-    return !PROVIDERS_NO_TOOL_MESSAGES.includes(this.provider);
-  }
-
-  // Format messages for providers that don't support tool messages (GLM, Gemini)
-  private _formatMessagesForProvider(messages: any[]): any[] {
-    if (this._supportsTools()) {
-      return messages;
-    }
-
-    // For GLM/Gemini: Convert tool messages to user messages
-    const formatted: any[] = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'tool') {
-        // Convert tool message to user message with tool result context
-        formatted.push({
-          role: 'user',
-          content: `[Tool Result: ${msg.tool_call_id || 'unknown'}]\n${msg.content}`
-        });
-      } else if (msg.role === 'assistant' && msg.tool_calls) {
-        // For assistant messages with tool_calls, add info about tool calls
-        const toolCallInfo = msg.tool_calls.map((tc: any) =>
-          `[Calling tool: ${tc.function?.name || 'unknown'}(${tc.function?.arguments || '{}'})]`
-        ).join('\n');
-
-        formatted.push({
-          role: 'assistant',
-          content: (msg.content || '') + (msg.content ? '\n' : '') + toolCallInfo
-        });
-      } else {
-        // Pass through other messages unchanged
-        formatted.push({ role: msg.role, content: msg.content });
-      }
-    }
-
-    // GLM requires at least one user message
-    const hasUserMessage = formatted.some(m => m.role === 'user');
-    if (!hasUserMessage && formatted.length > 0) {
-      formatted.push({ role: 'user', content: 'Continue.' });
-    }
-
-    return formatted;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CLIENT INITIALIZATION
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private _initClient(): void {
-    this.client = new OpenAI({
-      apiKey: this._apiKey,
-      baseURL: this._baseUrl
-    });
-  }
-
-  get apiKey(): string | undefined { return this._apiKey; }
-  set apiKey(value: string | undefined) {
-    this._apiKey = value;
-    this._initClient();
-  }
-
-  get baseUrl(): string | undefined { return this._baseUrl; }
-  set baseUrl(value: string | undefined) {
-    this._baseUrl = value;
-    this._initClient();
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SESSION MANAGEMENT
+  // HISTORY MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
 
   clearHistory(): void {
     this.history = [];
   }
+
+  trimHistory(maxMessages: number = 20): void {
+    if (this.history.length > maxMessages) {
+      this.history = this.history.slice(-maxMessages);
+    }
+  }
+
+  private _convertToAIMessages(): AIMessage[] {
+    return this.history
+      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      }));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SESSION MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
 
   saveSession(name: string = 'last'): { success: boolean; path?: string; error?: string } {
     const sessionPath = getSessionPath(name);
@@ -327,11 +497,7 @@ export class Agent {
           } catch (_e) {
             // Ignore parse errors
           }
-          return {
-            name: f.replace('.json', ''),
-            modified: stat.mtime,
-            summary
-          };
+          return { name: f.replace('.json', ''), modified: stat.mtime, summary };
         })
         .sort((a, b) => b.modified.getTime() - a.modified.getTime());
       return files;
@@ -340,15 +506,8 @@ export class Agent {
     }
   }
 
-  trimHistory(maxMessages: number = 20): void {
-    if (this.history.length > maxMessages) {
-      this.history = this.history.slice(-maxMessages);
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════════════════
-  // AGENTIC LOOP - Core chat with automatic tool execution
-  // Inspired by AI SDK's generateText with maxSteps/stopWhen pattern
+  // CHAT - AI SDK Powered
   // ═══════════════════════════════════════════════════════════════════════════
 
   async chat(userMessage: string, callbacks: ExtendedChatCallbacks = {}): Promise<void> {
@@ -357,61 +516,43 @@ export class Agent {
       onToken,
       onToolCall,
       onToolResult,
-      onStepFinish,  // NEW: Called after each step (like AI SDK)
       onEnd,
       onError
     } = callbacks;
 
     // Add user message to history
-    this.history.push({
-      role: 'user',
-      content: userMessage
-    });
-
+    this.history.push({ role: 'user', content: userMessage });
     this.trimHistory();
     this.stats.requests++;
 
     try {
-      // Start the agentic loop
-      let currentStep = 0;
-      let continueLoop = true;
-      let _finalResponse = '';
+      // Count input tokens
+      const inputTokens = countTokens(userMessage + this.systemPrompt, this.model);
+      this.stats.promptTokens += inputTokens;
 
-      while (continueLoop && currentStep < this.maxSteps) {
-        currentStep++;
+      // Create model for this request
+      const model = createModel(this.provider, this.model, {
+        apiKey: this._apiKey,
+        baseUrl: this._baseUrl
+      });
 
-        const stepResult = await this._executeStep({
-          stepNumber: currentStep,
-          onStart: currentStep === 1 ? onStart : null,
-          onToken,
-          onToolCall,
-          onToolResult,
-        });
+      // Create tools with callbacks
+      const tools = createAiSdkTools(
+        async (name, args) => {
+          if (onToolCall) {
+            return await onToolCall(name, args);
+          }
+          return this.yolo; // Auto-approve if yolo mode
+        },
+        onToolResult
+      );
 
-        _finalResponse = stepResult.response;
+      const messages = this._convertToAIMessages();
 
-        // Call onStepFinish callback (like AI SDK)
-        if (onStepFinish) {
-          onStepFinish({
-            stepNumber: currentStep,
-            text: stepResult.response,
-            toolCalls: stepResult.toolCalls,
-            hasMoreSteps: stepResult.hasToolCalls
-          });
-        }
-
-        // Continue loop only if there were tool calls
-        continueLoop = stepResult.hasToolCalls;
-
-        // Safety check: if no tool calls and no response, break
-        if (!stepResult.hasToolCalls && !stepResult.response) {
-          break;
-        }
-      }
-
-      // Warn if max steps reached
-      if (currentStep >= this.maxSteps && continueLoop) {
-        console.warn(`[Agent] Max steps (${this.maxSteps}) reached`);
+      if (this.stream) {
+        await this._streamChat(model, messages, tools, callbacks);
+      } else {
+        await this._generateChat(model, messages, tools, callbacks);
       }
 
       if (onEnd) onEnd();
@@ -425,162 +566,103 @@ export class Agent {
     }
   }
 
-  // Execute a single step in the agentic loop
-  private async _executeStep({ stepNumber, onStart, onToken, onToolCall, onToolResult }: ExecuteStepParams): Promise<StepResult> {
-    const rawMessages = [
-      { role: 'system', content: this.systemPrompt },
-      ...this.history
-    ];
-    const messages = this._formatMessagesForProvider(rawMessages);
+  // Streaming chat with AI SDK
+  private async _streamChat(
+    model: ReturnType<typeof createModel>,
+    messages: AIMessage[],
+    tools: ReturnType<typeof createAiSdkTools>,
+    callbacks: ExtendedChatCallbacks
+  ): Promise<void> {
+    const { onStart, onToken } = callbacks;
+
+    let fullResponse = '';
+
+    const result = streamText({
+      model,
+      system: this.systemPrompt,
+      messages,
+      tools,
+      stopWhen: stepCountIs(this.maxSteps),
+      onStepFinish: ({ toolCalls }) => {
+        // Track tool calls
+        if (toolCalls && toolCalls.length > 0) {
+          this.stats.toolCalls += toolCalls.length;
+        }
+      }
+    });
+
+    // Signal start
+    if (onStart) onStart();
+
+    // Stream tokens
+    for await (const chunk of result.textStream) {
+      fullResponse += chunk;
+      if (onToken) onToken(chunk);
+    }
+
+    // Update stats
+    const outputTokens = countTokens(fullResponse, this.model);
+    this.stats.completionTokens += outputTokens;
+    this.stats.totalTokens += outputTokens;
+
+    // Add to history
+    if (fullResponse) {
+      this.history.push({ role: 'assistant', content: fullResponse });
+    }
+  }
+
+  // Non-streaming chat with AI SDK
+  private async _generateChat(
+    model: ReturnType<typeof createModel>,
+    messages: AIMessage[],
+    tools: ReturnType<typeof createAiSdkTools>,
+    callbacks: ExtendedChatCallbacks
+  ): Promise<void> {
+    const { onStart, onToken } = callbacks;
 
     if (onStart) onStart();
 
-    // Build request params
-    const requestParams: any = {
-      model: this.model,
+    const result = await generateText({
+      model,
+      system: this.systemPrompt,
       messages,
-      stream: this.stream
-    };
-
-    // Only add tools if provider supports them
-    if (this._supportsTools()) {
-      requestParams.tools = getAllTools();
-      requestParams.tool_choice = 'auto';
-    }
-
-    const response = await this.client.chat.completions.create(requestParams);
-
-    let assistantMessage = '';
-    let toolCalls: ToolCall[] = [];
-
-    if (this.stream) {
-      // Handle streaming response
-      for await (const chunk of response as unknown as AsyncIterable<any>) {
-        const delta = chunk.choices[0]?.delta;
-
-        if (delta?.content) {
-          assistantMessage += delta.content;
-          if (onToken) onToken(delta.content);
-        }
-
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (tc.index !== undefined) {
-              if (!toolCalls[tc.index]) {
-                toolCalls[tc.index] = {
-                  id: tc.id || `call_${Date.now()}_${tc.index}`,
-                  type: 'function',
-                  function: { name: '', arguments: '' }
-                };
-              }
-              if (tc.function?.name) {
-                toolCalls[tc.index].function.name = tc.function.name;
-              }
-              if (tc.function?.arguments) {
-                toolCalls[tc.index].function.arguments += tc.function.arguments;
-              }
-              if (tc.id) {
-                toolCalls[tc.index].id = tc.id;
-              }
-            }
-          }
+      tools,
+      stopWhen: stepCountIs(this.maxSteps),
+      onStepFinish: ({ toolCalls }) => {
+        if (toolCalls && toolCalls.length > 0) {
+          this.stats.toolCalls += toolCalls.length;
         }
       }
-    } else {
-      // Handle non-streaming response
-      const choice = (response as any).choices[0];
-      assistantMessage = choice.message.content || '';
-      toolCalls = choice.message.tool_calls || [];
+    });
 
-      if (assistantMessage && onToken) {
-        onToken(assistantMessage);
-      }
+    const fullResponse = result.text;
+
+    if (onToken && fullResponse) {
+      onToken(fullResponse);
     }
 
-    // Filter out any undefined entries from toolCalls
-    toolCalls = toolCalls.filter(tc => tc && tc.function?.name);
+    // Update stats
+    const outputTokens = countTokens(fullResponse, this.model);
+    this.stats.completionTokens += outputTokens;
+    this.stats.totalTokens += outputTokens;
 
-    // Add assistant message to history
-    const historyEntry: any = {
-      role: 'assistant',
-      content: assistantMessage
-    };
-
-    if (toolCalls.length > 0) {
-      historyEntry.tool_calls = toolCalls;
+    // Add to history
+    if (fullResponse) {
+      this.history.push({ role: 'assistant', content: fullResponse });
     }
-
-    this.history.push(historyEntry);
-
-    // Execute tool calls if any
-    if (toolCalls.length > 0) {
-      for (const toolCall of toolCalls) {
-        const toolName = toolCall.function.name;
-        let toolArgs: Record<string, unknown> = {};
-
-        try {
-          toolArgs = JSON.parse(toolCall.function.arguments || '{}');
-        } catch (_e) {
-          toolArgs = {};
-        }
-
-        // Ask for approval (unless yolo mode)
-        let approved = this.yolo;
-        if (!approved && onToolCall) {
-          approved = await onToolCall(toolName, toolArgs);
-        }
-
-        if (approved) {
-          this.stats.toolCalls++;
-          const result = await executeTool(toolName, toolArgs);
-
-          if (onToolResult) {
-            onToolResult(toolName, result);
-          }
-
-          // Add tool result to history
-          this.history.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: typeof result === 'string' ? result : JSON.stringify(result)
-          } as Message);
-        } else {
-          // Tool was rejected
-          this.history.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: 'Tool execution was rejected by user.'
-          } as Message);
-        }
-      }
-    }
-
-    return {
-      response: assistantMessage,
-      toolCalls: toolCalls,
-      hasToolCalls: toolCalls.length > 0
-    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // LEGACY: continueAfterTools (for backward compatibility)
+  // LEGACY COMPATIBILITY
   // ═══════════════════════════════════════════════════════════════════════════
 
+  get client(): any {
+    console.warn('[Agent] Direct client access is deprecated. Use chat() method instead.');
+    return null;
+  }
+
   async continueAfterTools(callbacks: ChatCallbacks = {}): Promise<void> {
-    // This is now handled by the agentic loop in chat()
-    // Keeping for backward compatibility
-    const stepResult = await this._executeStep({
-      stepNumber: 0,
-      onStart: callbacks.onStart,
-      onToken: callbacks.onToken,
-      onToolCall: callbacks.onToolCall,
-      onToolResult: callbacks.onToolResult,
-    });
-
-    if (stepResult.hasToolCalls) {
-      return this.continueAfterTools(callbacks);
-    }
-
+    console.warn('[Agent] continueAfterTools is deprecated. AI SDK handles tool loops automatically.');
     if (callbacks.onEnd) callbacks.onEnd();
   }
 }
