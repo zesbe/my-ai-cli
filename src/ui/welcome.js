@@ -1,6 +1,5 @@
 import boxen from 'boxen';
 import chalk from 'chalk';
-import figlet from 'figlet';
 import gradient from 'gradient-string';
 import os from 'os';
 
@@ -16,14 +15,22 @@ function getCurrentDir() {
   return process.cwd();
 }
 
-// Create ASCII art logo
+// Create ZESBE ASCII art logo
 function createLogo() {
   const logo = `
-     * ▐▛███▜▌ *
-    * ▝▜█████▛▘ *
-     *  ▘▘ ▝▝  *
-`;
-  return chalk.cyan(logo);
+  ███████╗███████╗███████╗██████╗ ███████╗
+  ╚══███╔╝██╔════╝██╔════╝██╔══██╗██╔════╝
+    ███╔╝ █████╗  ███████╗██████╔╝█████╗  
+   ███╔╝  ██╔══╝  ╚════██║██╔══██╗██╔══╝  
+  ███████╗███████╗███████║██████╔╝███████╗
+  ╚══════╝╚══════╝╚══════╝╚═════╝ ╚══════╝`;
+  
+  return gradient.pastel(logo);
+}
+
+// Simple compact logo for smaller screens
+function createCompactLogo() {
+  return gradient.cristal('  ⚡ ZESBE AI CLI ⚡');
 }
 
 // Create welcome box
@@ -33,58 +40,49 @@ export function showWelcome(options = {}) {
   const model = options.model || 'gpt-4o';
   const provider = options.provider || 'openai';
 
-  // Left side content
-  const leftContent = [
+  // Check terminal width
+  const termWidth = process.stdout.columns || 80;
+  const useCompact = termWidth < 60;
+
+  // Content
+  const content = [
     '',
-    chalk.bold.white(`        Welcome back ${username}!`),
+    useCompact ? createCompactLogo() : createLogo(),
     '',
-    createLogo(),
-    chalk.gray(`${model} · ${provider}`),
-    chalk.gray(`        ${cwd}`),
+    chalk.white(`  Welcome back, ${chalk.cyan.bold(username)}!`),
+    '',
+    chalk.gray(`  🤖 Provider: ${chalk.white(provider)}`),
+    chalk.gray(`  📦 Model: ${chalk.white(model)}`),
+    chalk.gray(`  📁 ${cwd}`),
     ''
   ].join('\n');
 
-  // Right side content
-  const rightContent = [
-    chalk.bold.white('Tips for getting'),
-    chalk.bold.white('started'),
-    chalk.gray('Run /help to see all...'),
-    chalk.gray('commands available'),
-    chalk.gray('────────────────────'),
-    chalk.bold.white('Tools available'),
-    chalk.gray('bash, read, write,'),
-    chalk.gray('edit, glob, grep')
-  ].join('\n');
-
   // Create the box
-  const title = gradient.pastel(`─── My AI CLI v${VERSION} `);
+  const title = gradient.pastel(`─── Zesbe AI CLI v${VERSION} `);
 
-  const box = boxen(leftContent, {
-    padding: 1,
+  const box = boxen(content, {
+    padding: { top: 0, bottom: 0, left: 1, right: 1 },
     margin: 0,
     borderStyle: 'round',
     borderColor: 'cyan',
     title: title,
-    titleAlignment: 'left',
-    width: 75
+    titleAlignment: 'left'
   });
 
   console.log(box);
 
   // Status line
   if (options.yolo) {
-    console.log(chalk.yellow('\n  ⚠️  YOLO mode enabled - auto-approving all actions\n'));
+    console.log(chalk.yellow('\n  ⚡ YOLO mode enabled - auto-approving all actions\n'));
   }
 
-  // Prompt hint
-  console.log(chalk.gray('─'.repeat(75)));
-  console.log(chalk.gray('> Try "help me with coding" or use /tools to see available tools'));
-  console.log(chalk.gray('─'.repeat(75)));
+  // Prompt hints
+  console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
+  console.log(chalk.gray('  💡 Type a message or use /help for commands'));
+  console.log(chalk.gray('─'.repeat(Math.min(termWidth - 2, 70))));
 
   if (options.yolo) {
-    console.log(chalk.green('  ⏵⏵ bypass permissions on') + chalk.gray(' (shift+tab to cycle)'));
-  } else {
-    console.log(chalk.gray('  ⏵⏵ bypass permissions off') + chalk.gray(' (use --yolo to enable)'));
+    console.log(chalk.green('  ⚡ bypass permissions ON'));
   }
 
   console.log('');
@@ -99,7 +97,7 @@ export function showHeader(model, provider) {
 // Show goodbye message
 export function showGoodbye() {
   console.log(boxen(
-    chalk.cyan('\n  👋 Goodbye! See you next time.\n'),
+    gradient.pastel('\n  👋 Goodbye! Session saved.\n'),
     {
       padding: 0,
       margin: { top: 1, bottom: 1 },
