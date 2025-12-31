@@ -5,6 +5,16 @@ import { editTool, executeEdit } from './edit.js';
 import { globTool, executeGlob } from './glob.js';
 import { grepTool, executeGrep } from './grep.js';
 import { webTool, executeWebFetch } from './web.js';
+import {
+  gitTools,
+  executeGitStatus,
+  executeGitDiff,
+  executeGitLog,
+  executeGitCommit,
+  executeGitBranch,
+  executeGitCheckout,
+  executeGitStash
+} from './git.js';
 import { getMCPManager } from '../mcp/client.js';
 import type { Tool, ToolExecutor } from '../types/index.js';
 
@@ -16,7 +26,8 @@ export const builtInTools: Tool[] = [
   editTool,
   globTool,
   grepTool,
-  webTool
+  webTool,
+  ...gitTools
 ];
 
 // Get all tools (built-in + MCP)
@@ -37,7 +48,15 @@ const executors: Record<string, ToolExecutor> = {
   edit: executeEdit as ToolExecutor,
   glob: executeGlob as ToolExecutor,
   grep: executeGrep as ToolExecutor,
-  web_fetch: executeWebFetch as ToolExecutor
+  web_fetch: executeWebFetch as ToolExecutor,
+  // Git tools
+  git_status: executeGitStatus as ToolExecutor,
+  git_diff: executeGitDiff as ToolExecutor,
+  git_log: executeGitLog as ToolExecutor,
+  git_commit: executeGitCommit as ToolExecutor,
+  git_branch: executeGitBranch as ToolExecutor,
+  git_checkout: executeGitCheckout as ToolExecutor,
+  git_stash: executeGitStash as ToolExecutor
 };
 
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<string | object> {
@@ -74,3 +93,13 @@ export { editTool, executeEdit };
 export { globTool, executeGlob };
 export { grepTool, executeGrep };
 export { webTool, executeWebFetch };
+export {
+  gitTools,
+  executeGitStatus,
+  executeGitDiff,
+  executeGitLog,
+  executeGitCommit,
+  executeGitBranch,
+  executeGitCheckout,
+  executeGitStash
+};
