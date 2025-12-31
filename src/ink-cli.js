@@ -584,36 +584,34 @@ ${freeProviders.map(p => `
 
         const homeDir = os.homedir();
         const keyFile = path.join(homeDir, `.${agent.provider}_api_key`);
+        const keyExists = fs.existsSync(keyFile);
         
         if (args) {
-          // Save API key
+          // Save API key directly from argument
           try {
             fs.writeFileSync(keyFile, args.trim());
             fs.chmodSync(keyFile, 0o600);
             agent.apiKey = args.trim();
             addMessage('success', `API key saved to ${keyFile}`);
-            addMessage('info', `Atau set environment variable:\nexport ${providerInfo.envVar}="${args.trim()}"`);
           } catch (e) {
             addMessage('error', `Failed to save: ${e.message}`);
           }
         } else {
-          // Show how to set API key
+          // Show instructions and prompt user to paste key
           addMessage('info', `
-🔐 SET API KEY untuk ${providerInfo.name}:
-
-1️⃣ Via command:
-   /apikey YOUR_API_KEY_HERE
-
-2️⃣ Via environment variable:
-   export ${providerInfo.envVar}=your_key
-
-3️⃣ Via file:
-   echo "your_key" > ~/${providerInfo.apiKeyFile}
+🔐 SET API KEY untuk ${providerInfo.name}
 
 📍 Get API key: ${providerInfo.apiKeyUrl}
+📁 Status: ${keyExists ? '✓ Key exists' : '✗ Not set'}
 
-💡 Current key file: ${keyFile}
-   ${fs.existsSync(keyFile) ? '✓ File exists' : '✗ File not found'}
+💡 CARA SET:
+   Ketik: /apikey PASTE_YOUR_KEY_HERE
+   
+   Contoh:
+   /apikey AIzaSyB...xxxxx
+
+Atau via terminal:
+   export ${providerInfo.envVar}=your_key
 `);
         }
         break;

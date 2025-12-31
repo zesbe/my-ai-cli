@@ -267,8 +267,10 @@ Search:
 
         const homeDir = os.homedir();
         const keyFile = path.join(homeDir, `.${agent.provider}_api_key`);
+        const exists = fs.existsSync(keyFile);
 
         if (args) {
+          // Direct set from argument
           try {
             fs.writeFileSync(keyFile, args.trim());
             fs.chmodSync(keyFile, 0o600);
@@ -278,18 +280,14 @@ Search:
             console.log(chalk.red(`  ✗ Failed to save: ${e.message}\n`));
           }
         } else {
-          console.log(chalk.cyan(`\n  🔐 API KEY untuk ${providerInfo.name}:\n`));
-          console.log(chalk.gray(`  1. Via command:`));
-          console.log(chalk.white(`     /apikey YOUR_API_KEY_HERE\n`));
-          console.log(chalk.gray(`  2. Via environment:`));
-          console.log(chalk.white(`     export ${providerInfo.envVar}=your_key\n`));
-          console.log(chalk.gray(`  3. Via file:`));
-          console.log(chalk.white(`     echo "your_key" > ~/${providerInfo.apiKeyFile}\n`));
+          // Interactive prompt for API key
+          console.log(chalk.cyan(`\n  🔐 API KEY untuk ${providerInfo.name}\n`));
           console.log(chalk.blue(`  📍 Get key: ${providerInfo.apiKeyUrl}\n`));
-          const exists = fs.existsSync(keyFile);
-          console.log(chalk.gray(`  Key file: ${keyFile}`));
-          console.log(exists ? chalk.green(`  ✓ File exists`) : chalk.yellow(`  ✗ File not found`));
+          console.log(chalk.gray(`  Current: ${exists ? 'Key exists ✓' : 'Not set ✗'}`));
           console.log('');
+          
+          // Return special value to trigger interactive input
+          return { needInput: 'apikey', keyFile, providerInfo };
         }
         return true;
 
@@ -377,6 +375,33 @@ Search:
       // Handle commands
       if (input.startsWith('/')) {
         const handled = await handleCommand(input);
+        
+        // Check if command needs interactive input
+        if (handled && typeof handled === 'object' && handled.needInput === 'apikey') {
+          console.log(chalk.cyan('  Masukkan API key (atau ketik "cancel" untuk batal):'));
+          process.stdout.write(chalk.yellow('  > '));
+          
+          rl.question('', (apiKeyInput) => {
+            apiKeyInput = apiKeyInput.trim();
+            
+            if (apiKeyInput && apiKeyInput.toLowerCase() !== 'cancel') {
+              try {
+                fs.writeFileSync(handled.keyFile, apiKeyInput);
+                fs.chmodSync(handled.keyFile, 0o600);
+                agent.apiKey = apiKeyInput;
+                console.log(chalk.green(`\n  ✓ API key saved!`));
+                console.log(chalk.gray(`  File: ${handled.keyFile}\n`));
+              } catch (e) {
+                console.log(chalk.red(`\n  ✗ Failed: ${e.message}\n`));
+              }
+            } else {
+              console.log(chalk.gray('\n  Cancelled.\n'));
+            }
+            setImmediate(() => prompt());
+          });
+          return;
+        }
+        
         if (handled) {
           setImmediate(() => prompt());
           return;
