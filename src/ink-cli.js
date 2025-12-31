@@ -24,6 +24,10 @@ const SLASH_COMMANDS = [
   { value: '/apikey', label: '/apikey', description: '🔐 Set API key' },
   { value: '/free', label: '/free', description: '🆓 Show FREE providers' },
   { value: '/clear', label: '/clear', description: 'Clear conversation' },
+  { value: '/save', label: '/save', description: '💾 Save session' },
+  { value: '/load', label: '/load', description: '📂 Load session' },
+  { value: '/resume', label: '/resume', description: '♻️ Resume last session' },
+  { value: '/sessions', label: '/sessions', description: '📚 List saved sessions' },
   { value: '/stats', label: '/stats', description: '📊 Session statistics' },
   { value: '/context', label: '/context', description: '📄 Show project context' },
   { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve' },
@@ -385,6 +389,12 @@ const ChatApp = ({ agent, initialPrompt }) => {
   /context         Show project context
   /config          Show configuration
 
+💾 SESSION (Memory):
+  /save [name]     Save current session
+  /load [name]     Load saved session
+  /resume          Resume last session
+  /sessions        List all saved sessions
+
 🛠️ TOOLS (AI can use):
   bash, read, write, edit, glob, grep, web_fetch
 
@@ -508,8 +518,58 @@ Create one of these files in your project root:
         }
         break;
 
+      case '/save':
+        const saveName = args || 'last';
+        const saveResult = agent.saveSession(saveName);
+        if (saveResult.success) {
+          addMessage('success', `Session saved: ${saveName}\nPath: ${saveResult.path}`);
+        } else {
+          addMessage('error', `Save failed: ${saveResult.error}`);
+        }
+        break;
+
+      case '/load':
+        const loadName = args || 'last';
+        const loadResult = agent.loadSession(loadName);
+        if (loadResult.success) {
+          addMessage('success', `Session loaded: ${loadName}
+📅 Saved: ${new Date(loadResult.savedAt).toLocaleString()}
+💬 Messages: ${loadResult.messageCount}
+📝 Summary: ${loadResult.summary}`);
+        } else {
+          addMessage('error', `Load failed: ${loadResult.error}`);
+        }
+        break;
+
+      case '/resume':
+        const resumeResult = agent.loadSession('last');
+        if (resumeResult.success) {
+          addMessage('success', `♻️ Session resumed!
+📅 From: ${new Date(resumeResult.savedAt).toLocaleString()}
+💬 Messages: ${resumeResult.messageCount}
+📝 ${resumeResult.summary}`);
+        } else {
+          addMessage('system', `No previous session found. Start a new conversation!`);
+        }
+        break;
+
+      case '/sessions':
+        const { Agent } = await import('./agent.js');
+        const sessions = Agent.listSessions();
+        if (sessions.length === 0) {
+          addMessage('system', 'No saved sessions found.\nUse /save to save current session.');
+        } else {
+          const list = sessions.slice(0, 10).map(s => 
+            `• ${s.name} (${new Date(s.modified).toLocaleDateString()})\n  ${s.summary}`
+          ).join('\n');
+          addMessage('system', `📚 SAVED SESSIONS:\n\n${list}\n\nUse /load <name> to load a session`);
+        }
+        break;
+
       case '/exit':
-        console.log('\n👋 Goodbye!\n');
+        // Auto-save on exit
+        agent.saveSession('last');
+        console.log('\n👋 Goodbye! Session auto-saved.\n');
         exit();
         break;
 

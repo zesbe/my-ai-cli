@@ -34,6 +34,20 @@ function loadProjectContext(cwd = process.cwd()) {
   return null;
 }
 
+// Session storage directory
+const SESSION_DIR = path.join(process.env.HOME || '~', '.zesbe', 'sessions');
+
+function ensureSessionDir() {
+  if (!fs.existsSync(SESSION_DIR)) {
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+  }
+}
+
+function getSessionPath(name = 'last') {
+  ensureSessionDir();
+  return path.join(SESSION_DIR, `${name}.json`);
+}
+
 export class Agent {
   constructor(options = {}) {
     this.provider = options.provider || 'openai';
@@ -91,6 +105,89 @@ export class Agent {
 
   clearHistory() {
     this.history = [];
+  }
+
+  // Save session to file
+  saveSession(name = 'last') {
+    const sessionPath = getSessionPath(name);
+    const session = {
+      savedAt: new Date().toISOString(),
+      cwd: this.cwd,
+      provider: this.provider,
+      model: this.model,
+      history: this.history,
+      stats: this.stats,
+      summary: this.generateSummary()
+    };
+    
+    try {
+      fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
+      return { success: true, path: sessionPath };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  // Load session from file
+  loadSession(name = 'last') {
+    const sessionPath = getSessionPath(name);
+    
+    if (!fs.existsSync(sessionPath)) {
+      return { success: false, error: 'No saved session found' };
+    }
+    
+    try {
+      const data = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+      this.history = data.history || [];
+      this.stats = { ...this.stats, ...data.stats };
+      return { 
+        success: true, 
+        savedAt: data.savedAt,
+        summary: data.summary,
+        messageCount: this.history.length
+      };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  // Generate conversation summary
+  generateSummary() {
+    if (this.history.length === 0) return 'Empty session';
+    
+    const userMessages = this.history.filter(m => m.role === 'user');
+    const lastMessages = userMessages.slice(-3).map(m => 
+      m.content.substring(0, 50) + (m.content.length > 50 ? '...' : '')
+    );
+    
+    return lastMessages.join(' → ') || 'No user messages';
+  }
+
+  // List saved sessions
+  static listSessions() {
+    ensureSessionDir();
+    try {
+      const files = fs.readdirSync(SESSION_DIR)
+        .filter(f => f.endsWith('.json'))
+        .map(f => {
+          const filePath = path.join(SESSION_DIR, f);
+          const stat = fs.statSync(filePath);
+          let summary = '';
+          try {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+            summary = data.summary || '';
+          } catch (e) {}
+          return {
+            name: f.replace('.json', ''),
+            modified: stat.mtime,
+            summary
+          };
+        })
+        .sort((a, b) => b.modified - a.modified);
+      return files;
+    } catch (e) {
+      return [];
+    }
   }
 
   // Limit history to prevent token overflow
