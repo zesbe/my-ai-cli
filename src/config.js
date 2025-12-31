@@ -39,7 +39,7 @@ const DEFAULT_CONFIG = {
       models: ['llama3', 'codellama', 'mistral']
     },
     glm: {
-      baseUrl: 'https://api.z.ai/api/paas/v4/',
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
       apiKeyFile: path.join(HOME, '.glm_api_key'),
       models: ['glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air']
     }

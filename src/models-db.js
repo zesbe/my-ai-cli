@@ -120,10 +120,10 @@ export const PROVIDERS = {
   },
   glm: {
     name: 'GLM (Z.AI)',
-    baseUrl: 'https://api.z.ai/api/paas/v4/',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4/',
     apiKeyEnv: 'GLM_API_KEY',
     apiKeyFile: '.glm_api_key',
-    description: 'Chinese GLM models - OpenAI compatible',
+    description: 'Chinese GLM models - GLM Coding Plan ($3/mo)',
     models: [
       { id: 'glm-4.7', name: 'GLM-4.7', description: 'Latest & best for coding (200k context)', recommended: true },
       { id: 'glm-4.6', name: 'GLM-4.6', description: 'Previous flagship model' },
