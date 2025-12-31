@@ -582,33 +582,40 @@ interface MCPMainMenuProps {
   toolsCount: number;
 }
 
-// Items defined outside component to ensure stable references
-const MCP_MENU_ITEMS = [
-  { label: '📋 List servers', value: 'list' },
-  { label: '🔌 Connect all', value: 'connect' },
-  { label: '⚡ Disconnect all', value: 'disconnect' },
-  { label: '🔧 View tools', value: 'tools' },
-  { label: '🏪 Browse servers', value: 'browse' },
-  { label: '🔍 Search servers', value: 'search' },
-  { label: '🛒 Marketplace', value: 'marketplace' },
-  { label: '⚙️ Edit config', value: 'config' },
-];
+// MCP Menu items with action mapping
+const MCP_MENU_OPTIONS = [
+  { label: '📋 List servers', action: 'list', desc: 'View connected servers' },
+  { label: '🔌 Connect all', action: 'connect', desc: 'Connect to all configured MCP servers' },
+  { label: '⚡ Disconnect all', action: 'disconnect', desc: 'Disconnect from all servers' },
+  { label: '🔧 View tools', action: 'tools', desc: 'List available MCP tools' },
+  { label: '🏪 Browse servers', action: 'browse', desc: 'Browse popular MCP servers to install' },
+  { label: '🔍 Search servers', action: 'search', desc: 'Search for MCP servers by name' },
+  { label: '🛒 Marketplace', action: 'marketplace', desc: 'Open online MCP marketplaces' },
+  { label: '⚙️ Edit config', action: 'config', desc: 'Show config file location' },
+] as const;
 
 const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connectedCount, toolsCount }) => {
   useInput((_input: string, key: InkKey) => {
     if (key.escape) onCancel();
   });
 
-  // Descriptions with dynamic counts
-  const descriptions: Record<string, string> = {
-    list: `View connected servers (${connectedCount} active)`,
-    connect: 'Connect to all configured MCP servers',
-    disconnect: 'Disconnect from all servers',
-    tools: `List available MCP tools (${toolsCount} tools)`,
-    browse: 'Browse popular MCP servers to install',
-    search: 'Search for MCP servers by name',
-    marketplace: 'Open online MCP marketplaces',
-    config: 'Show config file location',
+  // Build items for SelectInput - use label as value since ink-select-input reliably passes label
+  const items = MCP_MENU_OPTIONS.map(opt => ({
+    label: opt.label,
+    value: opt.label, // Use label as value for reliable matching
+  }));
+
+  // Map label back to action
+  const labelToAction: Record<string, string> = {};
+  MCP_MENU_OPTIONS.forEach(opt => {
+    labelToAction[opt.label] = opt.action;
+  });
+
+  // Descriptions lookup by action
+  const getDesc = (action: string): string => {
+    if (action === 'list') return `View connected servers (${connectedCount} active)`;
+    if (action === 'tools') return `List available MCP tools (${toolsCount} tools)`;
+    return MCP_MENU_OPTIONS.find(o => o.action === action)?.desc || '';
   };
 
   return h(Box, {
@@ -619,18 +626,22 @@ const MCPMainMenu: React.FC<MCPMainMenuProps> = ({ onSelect, onCancel, connected
   },
     h(Text, { color: 'cyan', bold: true }, '🔌 MCP Server Management:'),
     h(SelectInput, {
-      items: MCP_MENU_ITEMS,
+      items,
       onSelect: (item: { label: string; value: string }) => {
-        onSelect(item.value);
+        // Get action from label
+        const action = labelToAction[item.label] || labelToAction[item.value] || 'config';
+        onSelect(action);
       },
-      itemComponent: ({ isSelected, label, value }: { isSelected: boolean; label: string; value: string }) =>
-        h(Box, { flexDirection: 'column' },
+      itemComponent: ({ isSelected, label }: { isSelected: boolean; label: string }) => {
+        const action = labelToAction[label] || 'config';
+        return h(Box, { flexDirection: 'column' },
           h(Text, {
             color: isSelected ? 'cyan' : 'white',
             bold: isSelected
           }, `${isSelected ? '▸ ' : '  '}${label}`),
-          h(Text, { color: 'gray', dimColor: true }, `    ${descriptions[value] || ''}`)
-        )
+          h(Text, { color: 'gray', dimColor: true }, `    ${getDesc(action)}`)
+        );
+      }
     } as any)
   );
 };
