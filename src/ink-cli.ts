@@ -174,7 +174,7 @@ const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Ze
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % ASSESS_FRAMES.length);
       setDots(d => d.length >= 3 ? '' : d + '.');
-    }, 200);
+    }, 400); // Slowed down from 200ms to reduce flicker
     return () => clearInterval(timer);
   }, []);
 
@@ -199,7 +199,7 @@ const TypingIndicator: React.FC<TypingIndicatorProps> = ({ type = 'dots' }) => {
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % (type === 'brain' ? BRAIN_FRAMES.length : TYPING_FRAMES.length));
-    }, 120);
+    }, 250); // Slowed down from 120ms to reduce flicker
     return () => clearInterval(timer);
   }, [type]);
 
@@ -231,7 +231,7 @@ const StreamingStatus: React.FC<StreamingStatusProps> = ({ isLoading, isTyping, 
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % STREAM_FRAMES.length);
       setDots(d => d.length >= 3 ? '' : d + '.');
-    }, 150);
+    }, 300); // Slowed down from 150ms to reduce flicker
     return () => clearInterval(timer);
   }, [isLoading, isTyping]);
 
@@ -268,7 +268,7 @@ const ToolCallIndicator: React.FC<ToolCallIndicatorProps> = ({ toolCall }) => {
     const timer = setInterval(() => {
       setFrame(f => (f + 1) % TOOL_SPINNER_FRAMES.length);
       setElapsed(Math.floor((Date.now() - toolCall.startTime) / 1000));
-    }, 300);
+    }, 500); // Slowed down from 300ms to reduce flicker
     return () => clearInterval(timer);
   }, [toolCall.status, toolCall.startTime]);
 
@@ -756,7 +756,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
             fullResponse += token;
             tokens++;
 
-            // Buffer tokens, update UI every 80ms (reduces flicker)
+            // Buffer tokens, update UI every 200ms (reduces flicker significantly)
             responseBuffer.current = fullResponse;
             tokenBuffer.current = tokens;
 
@@ -764,7 +764,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
               updateTimer.current = setTimeout(() => {
                 flushBuffer();
                 updateTimer.current = null;
-              }, 80);
+              }, 200);
             }
           }
         },
