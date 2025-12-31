@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import readline from 'readline';
 import dotenv from 'dotenv';
 import { startInteractiveMode } from './cli.js';
+import { startInkMode } from './ink-cli.js';
 import { Agent } from './agent.js';
 import { showWelcome } from './ui/welcome.js';
 import { loadConfig, getApiKey, getProviderConfig, saveApiKey } from './config.js';
@@ -28,6 +29,7 @@ program
   .option('-y, --yolo', 'Auto-approve all actions (bypass permissions)', config.yolo)
   .option('-q, --quiet', 'Skip welcome screen')
   .option('--no-stream', 'Disable streaming output')
+  .option('--classic', 'Use classic readline mode (default: ink)')
   .option('--setup', 'Run setup wizard')
   .argument('[prompt...]', 'Initial prompt')
   .action(async (promptArgs, options) => {
@@ -99,7 +101,14 @@ program
 
     // Start CLI
     const initialPrompt = promptArgs.join(' ');
-    await startInteractiveMode(agent, initialPrompt);
+    
+    if (options.classic) {
+      // Classic readline mode
+      await startInteractiveMode(agent, initialPrompt);
+    } else {
+      // Ink mode (default)
+      await startInkMode(agent, initialPrompt);
+    }
   });
 
 // Setup wizard
