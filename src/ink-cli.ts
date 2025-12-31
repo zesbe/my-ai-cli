@@ -840,8 +840,32 @@ const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
   };
 
   const executeCommand = async (cmd: string): Promise<void> => {
-    const [command, ...argParts] = cmd.split(' ');
+    const [rawCommand, ...argParts] = cmd.split(' ');
     const args = argParts.join(' ');
+
+    // All supported commands for partial matching
+    const ALL_COMMANDS = [
+      '/help', '/setup', '/providers', '/provider', '/model', '/apikey', '/free',
+      '/clear', '/yolo', '/stats', '/context', '/config',
+      '/save', '/load', '/resume', '/sessions',
+      '/attach', '/detach', '/files', '/preview', '/diff',
+      '/export', '/history', '/copy', '/paste', '/shortcuts',
+      '/mcp', '/skills', '/exit'
+    ];
+
+    // Partial command matching
+    let command = rawCommand.toLowerCase();
+    if (!ALL_COMMANDS.includes(command)) {
+      // Try prefix matching
+      const matches = ALL_COMMANDS.filter(c => c.startsWith(command));
+      if (matches.length === 1) {
+        command = matches[0]; // Unambiguous match
+      } else if (matches.length > 1) {
+        addMessage('error', `Ambiguous command: ${rawCommand}\nDid you mean: ${matches.join(', ')}`);
+        return;
+      }
+      // If no matches, let it fall through to default case
+    }
 
     switch (command) {
       case '/help':
