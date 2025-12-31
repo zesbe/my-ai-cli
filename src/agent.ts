@@ -578,6 +578,7 @@ export class Agent {
 
     let fullResponse = '';
     let streamError: Error | null = null;
+    let toolCallsThisChat = 0; // Track tool calls for this specific chat
 
     const result = streamText({
       model,
@@ -591,6 +592,7 @@ export class Agent {
         // Track tool calls
         if (toolCalls && toolCalls.length > 0) {
           this.stats.toolCalls += toolCalls.length;
+          toolCallsThisChat += toolCalls.length;
         }
       }
     });
@@ -605,23 +607,33 @@ export class Agent {
     }
 
     // Check for errors - AI SDK stream may complete without throwing
+    // Note: If tools were executed successfully, we don't treat empty response as error
+    // because some providers (like MiniMax) may not continue after tool execution
+    const toolsExecuted = toolCallsThisChat > 0;
+
     try {
       // Access internal state to check for errors
       const resultAny = result as unknown as { _steps?: { status?: { type: string; error?: Error } } };
       if (resultAny._steps?.status?.type === 'rejected' && resultAny._steps.status.error) {
-        streamError = resultAny._steps.status.error;
-      } else if (!fullResponse) {
-        // No response generated - likely an error occurred
+        // Only throw if no tools executed - otherwise tool result IS the response
+        if (!toolsExecuted) {
+          streamError = resultAny._steps.status.error;
+        }
+      } else if (!fullResponse && !toolsExecuted) {
+        // No response AND no tools executed - check finish reason
         const finishReason = await result.finishReason;
-        if (finishReason !== 'stop') {
-          streamError = new Error(`No response generated (${finishReason || 'unknown'})`);
+        if (finishReason === 'error' || finishReason === 'content-filter') {
+          streamError = new Error(`No response generated (${finishReason})`);
         }
       }
+      // If tools were executed, we consider it a successful interaction
     } catch (e) {
-      streamError = e as Error;
+      if (!toolsExecuted) {
+        streamError = e as Error;
+      }
     }
 
-    // Throw if there was an error
+    // Throw if there was an error (and no tools were executed)
     if (streamError) {
       throw streamError;
     }
