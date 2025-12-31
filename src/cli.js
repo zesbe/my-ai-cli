@@ -132,6 +132,12 @@ export async function startInteractiveMode(agent, initialPrompt) {
       spinner.stop();
       console.error(chalk.red(`\nError: ${err.message}`));
     }
+
+    // Exit after one-shot prompt (non-interactive)
+    if (!process.stdin.isTTY) {
+      rl.close();
+      process.exit(0);
+    }
   }
 
   // Start interactive loop
