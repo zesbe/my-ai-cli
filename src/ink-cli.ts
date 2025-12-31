@@ -1,38 +1,150 @@
-/**
- * CLI Interface - readline + chalk + enquirer version
- * No Ink/React - Direct terminal control for zero flicker
- */
-
-import readline from 'readline';
-import chalk from 'chalk';
-import ora, { Ora } from 'ora';
-import Enquirer from 'enquirer';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import React, { useState, useEffect, useRef } from 'react';
+import { render, Box, Text, useInput, useApp } from 'ink';
+import TextInput from 'ink-text-input';
+import SelectInput from 'ink-select-input';
 import { PROVIDERS, getProviderList, getModelsForProvider } from './models-db.js';
 import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import { getMCPManager } from './mcp/client.js';
 import { getSkillsManager } from './skills/manager.js';
 import { POPULAR_MCP_SERVERS, searchServers, getServerById, generateInstallConfig, MARKETPLACE_LINKS } from './mcp/marketplace.js';
-import { highlightCodeBlocks } from './utils/index.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import type { Agent as AgentType } from './agent.js';
+
+// Import new utilities
+import { processSimpleMarkdown, renderMarkdown, highlightCodeBlocks } from './utils/index.js';
+import { copyToClipboard, readFromClipboard, isClipboardAvailable, matchShortcut, formatShortcut, getShortcutsByCategory, DEFAULT_SHORTCUTS } from './utils/clipboard.js';
 import { ContextManager, createFilePreview, formatContextInfo } from './utils/context.js';
 import { saveConversation, listConversations, searchConversations, exportConversation, formatConversationList, formatSearchResults } from './utils/export.js';
 import type { ChatMessage, ExportFormat } from './utils/export.js';
-import { copyToClipboard, readFromClipboard, isClipboardAvailable, formatShortcut, getShortcutsByCategory } from './utils/clipboard.js';
+import { getCompletions, CompletionCycler } from './utils/completion.js';
+import type { CompletionContext } from './utils/completion.js';
 import { createFileDiff } from './utils/diff.js';
-import type { Agent as AgentType } from './agent.js';
 
-// Session directory
+// Session helper
 const SESSION_DIR = path.join(os.homedir(), '.zesbe', 'sessions');
 
-// ANSI escape codes for cursor control
-const CLEAR_LINE = '\r\x1b[K';
-const CURSOR_UP = '\x1b[A';
-const CURSOR_HIDE = '\x1b[?25l';
-const CURSOR_SHOW = '\x1b[?25h';
+interface SavedSession {
+  name: string;
+  modified: Date;
+  summary: string;
+}
 
-// Tool icons
+function listSavedSessions(): SavedSession[] {
+  if (!fs.existsSync(SESSION_DIR)) return [];
+  try {
+    return fs.readdirSync(SESSION_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const filePath = path.join(SESSION_DIR, f);
+        const stat = fs.statSync(filePath);
+        let summary = '';
+        try {
+          const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          summary = data.summary || '';
+        } catch (_e) {
+          // Ignore parsing errors
+        }
+        return { name: f.replace('.json', ''), modified: stat.mtime, summary };
+      })
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  } catch (_e) {
+    return [];
+  }
+}
+
+const { createElement: h } = React;
+
+// Ink Key type for useInput
+interface InkKey {
+  upArrow: boolean;
+  downArrow: boolean;
+  leftArrow: boolean;
+  rightArrow: boolean;
+  pageDown: boolean;
+  pageUp: boolean;
+  return: boolean;
+  escape: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  tab: boolean;
+  backspace: boolean;
+  delete: boolean;
+  meta: boolean;
+}
+
+// Type definitions
+interface SlashCommand {
+  value: string;
+  label: string;
+  description: string;
+}
+
+interface MessageData {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'error' | 'success';
+  content: string;
+  timestamp?: string;
+  tokens?: number;
+}
+
+interface SelectItem {
+  label: string;
+  value: string;
+  desc?: string;
+  isCurrent?: boolean;
+  recommended?: boolean;
+}
+
+// Constants
+const SLASH_COMMANDS: SlashCommand[] = [
+  { value: '/help', label: '/help', description: 'Show all available commands' },
+  { value: '/setup', label: '/setup', description: '🔑 Setup API key for provider' },
+  { value: '/providers', label: '/providers', description: '📋 List all providers with pricing' },
+  { value: '/model', label: '/model', description: 'Switch AI model' },
+  { value: '/provider', label: '/provider', description: 'Switch AI provider' },
+  { value: '/apikey', label: '/apikey', description: '🔐 Set API key' },
+  { value: '/free', label: '/free', description: '🆓 Show FREE providers' },
+  { value: '/clear', label: '/clear', description: 'Clear conversation' },
+  { value: '/save', label: '/save', description: '💾 Save session' },
+  { value: '/load', label: '/load', description: '📂 Load session' },
+  { value: '/resume', label: '/resume', description: '♻️ Resume last session' },
+  { value: '/sessions', label: '/sessions', description: '📚 List saved sessions' },
+  { value: '/stats', label: '/stats', description: '📊 Session statistics' },
+  { value: '/context', label: '/context', description: '📄 Show project context' },
+  { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve' },
+  { value: '/config', label: '/config', description: 'Show configuration' },
+  { value: '/skills', label: '/skills', description: '📚 Skills management' },
+  { value: '/mcp', label: '/mcp', description: '🔌 MCP server management' },
+  { value: '/attach', label: '/attach', description: '📎 Attach file to context' },
+  { value: '/detach', label: '/detach', description: '📎 Remove file from context' },
+  { value: '/files', label: '/files', description: '📁 List attached files' },
+  { value: '/preview', label: '/preview', description: '👁️ Preview file content' },
+  { value: '/export', label: '/export', description: '📤 Export conversation' },
+  { value: '/history', label: '/history', description: '📜 Search conversation history' },
+  { value: '/copy', label: '/copy', description: '📋 Copy last response' },
+  { value: '/paste', label: '/paste', description: '📋 Paste from clipboard' },
+  { value: '/shortcuts', label: '/shortcuts', description: '⌨️ Show keyboard shortcuts' },
+  { value: '/diff', label: '/diff', description: '📊 Show diff between files' },
+  { value: '/exit', label: '/exit', description: 'Exit CLI' },
+];
+
+const TYPING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const BRAIN_FRAMES = ['🧠', '💭', '💡', '✨'];
+const ASSESS_FRAMES = ['◐', '◓', '◑', '◒'];
+const TOOL_SPINNER_FRAMES = ['●', '○'];
+
+// Tool call data
+interface ToolCallData {
+  id: string;
+  name: string;
+  args: string;
+  status: 'running' | 'completed' | 'error';
+  startTime: number;
+  result?: string;
+}
+
+// Tool name to icon mapping
 const TOOL_ICONS: Record<string, string> = {
   bash: '⚡',
   read: '📖',
@@ -43,766 +155,724 @@ const TOOL_ICONS: Record<string, string> = {
   web_fetch: '🌐',
   git_status: '📊',
   git_diff: '📋',
+  git_log: '📜',
+  git_commit: '💾',
+  git_branch: '🌿',
   default: '🔧'
 };
 
-interface ChatState {
-  messages: Array<{ role: string; content: string; tokens?: number }>;
-  totalTokens: number;
-  lastResponse: string;
-  attachedFiles: string[];
-  inputHistory: string[];
-  historyIndex: number;
+// Components
+interface AssessingIndicatorProps {
+  agentName?: string;
 }
 
-// All supported commands with descriptions for suggestions
-const COMMAND_LIST = [
-  { cmd: '/help', desc: 'Show all commands', cat: '💬' },
-  { cmd: '/setup', desc: 'Setup provider API key', cat: '🔌' },
-  { cmd: '/providers', desc: 'List all providers', cat: '🔌' },
-  { cmd: '/provider', desc: 'Switch provider', cat: '🔌' },
-  { cmd: '/model', desc: 'Switch model', cat: '🔌' },
-  { cmd: '/apikey', desc: 'Set API key', cat: '🔌' },
-  { cmd: '/free', desc: 'Show FREE providers', cat: '🔌' },
-  { cmd: '/clear', desc: 'Clear conversation', cat: '💬' },
-  { cmd: '/yolo', desc: 'Toggle auto-approve', cat: '💬' },
-  { cmd: '/stats', desc: 'Session statistics', cat: '💬' },
-  { cmd: '/context', desc: 'Show project context', cat: '💬' },
-  { cmd: '/config', desc: 'Show configuration', cat: '💬' },
-  { cmd: '/save', desc: 'Save session', cat: '💾' },
-  { cmd: '/load', desc: 'Load session', cat: '💾' },
-  { cmd: '/resume', desc: 'Resume last session', cat: '💾' },
-  { cmd: '/sessions', desc: 'List saved sessions', cat: '💾' },
-  { cmd: '/attach', desc: 'Attach file to context', cat: '📎' },
-  { cmd: '/detach', desc: 'Remove file from context', cat: '📎' },
-  { cmd: '/files', desc: 'List attached files', cat: '📎' },
-  { cmd: '/preview', desc: 'Preview file content', cat: '📎' },
-  { cmd: '/diff', desc: 'Show diff between files', cat: '📎' },
-  { cmd: '/export', desc: 'Export chat history', cat: '📤' },
-  { cmd: '/history', desc: 'Search conversation history', cat: '📤' },
-  { cmd: '/copy', desc: 'Copy last response', cat: '📤' },
-  { cmd: '/paste', desc: 'Paste from clipboard', cat: '📤' },
-  { cmd: '/shortcuts', desc: 'Show keyboard shortcuts', cat: '📤' },
-  { cmd: '/mcp', desc: 'MCP server management', cat: '🔌' },
-  { cmd: '/skills', desc: 'Skills management', cat: '📚' },
-  { cmd: '/exit', desc: 'Exit the CLI', cat: '🚪' },
-];
+const AssessingIndicator: React.FC<AssessingIndicatorProps> = ({ agentName = 'Zesbe' }) => {
+  const [frame, setFrame] = useState(0);
+  const [dots, setDots] = useState('');
 
-const ALL_COMMANDS = COMMAND_LIST.map(c => c.cmd);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % ASSESS_FRAMES.length);
+      setDots(d => d.length >= 3 ? '' : d + '.');
+    }, 400); // Slowed down from 200ms to reduce flicker
+    return () => clearInterval(timer);
+  }, []);
 
-/**
- * Main CLI Class
- */
-class ChatCLI {
-  private agent: AgentType;
-  private rl: readline.Interface;
-  private state: ChatState;
-  private contextManager: ContextManager;
-  private currentSpinner: Ora | null = null;
-  private isProcessing = false;
-  private stdinClosed = false;
-  private originalStderr: typeof process.stderr.write;
-  private isInteractive: boolean;
-  private inputQueue: string[] = [];
+  return h(Box, {
+    justifyContent: 'center',
+    marginY: 1,
+    paddingX: 2
+  },
+    h(Text, { color: 'yellow' }, ASSESS_FRAMES[frame]),
+    h(Text, { color: 'gray' }, ` ${agentName} is assessing${dots}`),
+    h(Text, { color: 'gray', dimColor: true }, '  (esc to interrupt)')
+  );
+};
 
-  constructor(agent: AgentType) {
-    // Suppress verbose AI SDK error output (printed to stderr)
-    this.originalStderr = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((...args: Parameters<typeof process.stderr.write>) => {
-      const msg = String(args[0]);
-      // Filter out verbose AI SDK errors - we handle these cleanly
-      if (msg.includes('RetryError') || msg.includes('AI_APICallError') || msg.includes('Symbol(vercel')) {
-        return true;
-      }
-      return this.originalStderr(...args);
-    }) as typeof process.stderr.write;
-    this.agent = agent;
-    this.contextManager = new ContextManager();
-    this.state = {
-      messages: [],
-      totalTokens: 0,
-      lastResponse: '',
-      attachedFiles: [],
-      inputHistory: [],
-      historyIndex: -1
-    };
+interface TypingIndicatorProps {
+  type?: 'dots' | 'brain';
+}
 
-    // Create readline interface
-    // Use terminal mode only for interactive TTY, not for piped input
-    this.isInteractive = !!process.stdin.isTTY;
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: this.isInteractive
-    });
+const TypingIndicator: React.FC<TypingIndicatorProps> = ({ type = 'dots' }) => {
+  const [frame, setFrame] = useState(0);
 
-    // For piped input, collect all lines into a queue
-    if (!this.isInteractive) {
-      this.rl.on('line', (line) => {
-        this.inputQueue.push(line);
-      });
-    }
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % (type === 'brain' ? BRAIN_FRAMES.length : TYPING_FRAMES.length));
+    }, 250); // Slowed down from 120ms to reduce flicker
+    return () => clearInterval(timer);
+  }, [type]);
 
-    // Handle readline close - but NOT while processing or if we have queued input
-    this.rl.on('close', () => {
-      this.stdinClosed = true;
-      // For piped mode with queued input, don't exit yet
-      if (!this.isInteractive && this.inputQueue.length > 0) {
-        return;
-      }
-      // If we're in the middle of processing, don't exit yet - let processing complete
-      if (this.isProcessing) {
-        return;
-      }
-      this.cleanup();
-      process.exit(0);
-    });
-
-    // Handle SIGINT
-    process.on('SIGINT', () => {
-      if (this.isProcessing && this.currentSpinner) {
-        this.currentSpinner.stop();
-        console.log(chalk.yellow('\n⚠️ Interrupted'));
-        this.isProcessing = false;
-        this.prompt();
-      } else {
-        this.cleanup();
-        process.exit(0);
-      }
-    });
+  if (type === 'brain') {
+    return h(Text, { color: 'cyan' }, `${BRAIN_FRAMES[frame]} AI is thinking...`);
   }
 
-  /**
-   * Cleanup before exit
-   */
-  private cleanup(): void {
-    // Restore original stderr
-    process.stderr.write = this.originalStderr;
-    process.stdout.write(CURSOR_SHOW);
-    console.log(chalk.cyan('\n👋 Goodbye!\n'));
-    this.agent.saveSession('last');
+  return h(Box, null,
+    h(Text, { color: 'cyan' }, TYPING_FRAMES[frame]),
+    h(Text, { color: 'gray' }, ' AI is typing...')
+  );
+};
+
+// Streaming status indicator with animation
+const STREAM_FRAMES = ['▰▱▱▱▱', '▰▰▱▱▱', '▰▰▰▱▱', '▰▰▰▰▱', '▰▰▰▰▰', '▱▰▰▰▰', '▱▱▰▰▰', '▱▱▱▰▰', '▱▱▱▱▰'];
+
+interface StreamingStatusProps {
+  isLoading: boolean;
+  isTyping: boolean;
+  tokenCount: number;
+}
+
+const StreamingStatus: React.FC<StreamingStatusProps> = ({ isLoading, isTyping, tokenCount }) => {
+  const [frame, setFrame] = useState(0);
+  const [dots, setDots] = useState('');
+
+  useEffect(() => {
+    if (!isLoading && !isTyping) return;
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % STREAM_FRAMES.length);
+      setDots(d => d.length >= 3 ? '' : d + '.');
+    }, 300); // Slowed down from 150ms to reduce flicker
+    return () => clearInterval(timer);
+  }, [isLoading, isTyping]);
+
+  if (isLoading) {
+    return h(Box, { gap: 1 },
+      h(Text, { color: 'yellow' }, STREAM_FRAMES[frame]),
+      h(Text, { color: 'yellow' }, `Connecting${dots}`)
+    );
   }
 
-  /**
-   * Print header
-   */
-  private printHeader(): void {
-    const providerName = PROVIDERS[this.agent.provider]?.name || this.agent.provider;
-    const yoloIndicator = this.agent.yolo ? chalk.yellow(' ⚡ YOLO') : '';
-
-    console.log('');
-    console.log(chalk.cyan.bold('╭────────────────────────────────────────────────────────────╮'));
-    console.log(chalk.cyan.bold('│') + chalk.white.bold('  🚀 ZESBE AI CLI                                          ') + chalk.cyan.bold('│'));
-    console.log(chalk.cyan.bold('├────────────────────────────────────────────────────────────┤'));
-    console.log(chalk.cyan.bold('│') + chalk.gray(`  Provider: ${providerName.padEnd(20)}Model: ${this.agent.model.substring(0, 15).padEnd(15)}`) + yoloIndicator.padEnd(7) + chalk.cyan.bold('│'));
-    console.log(chalk.cyan.bold('╰────────────────────────────────────────────────────────────╯'));
-    console.log('');
-    console.log(chalk.gray('  💡 Type ') + chalk.cyan('/') + chalk.gray(' to see commands • ') + chalk.cyan('/help') + chalk.gray(' for full guide • ') + chalk.cyan('/exit') + chalk.gray(' to quit'));
-    console.log('');
+  if (isTyping) {
+    return h(Box, { gap: 1 },
+      h(Text, { color: 'green' }, STREAM_FRAMES[frame]),
+      h(Text, { color: 'green' }, `Streaming`),
+      tokenCount > 0 && h(Text, { color: 'cyan' }, ` (${tokenCount} tokens)`)
+    );
   }
 
-  /**
-   * Print prompt
-   */
-  private prompt(): void {
-    // If stdin was closed while we were processing, exit gracefully now
-    if (this.stdinClosed && this.inputQueue.length === 0) {
-      this.cleanup();
-      process.exit(0);
-    }
+  return null;
+};
 
-    // Show separator line and prompt like Claude Code
-    console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────────'));
-    const promptStr = chalk.cyan.bold('> ');
+// Claude-style Tool Call Indicator
+interface ToolCallIndicatorProps {
+  toolCall: ToolCallData;
+}
 
-    if (this.isInteractive) {
-      // Interactive mode: use question() for prompt
-      this.rl.question(promptStr, async (input) => {
-        await this.handleInput(input);
-      });
-    } else {
-      // Piped mode: process from queue
-      if (this.inputQueue.length > 0) {
-        const input = this.inputQueue.shift()!;
-        process.stdout.write(promptStr + input + '\n');
-        this.handleInput(input).then(() => {
-          // Continue processing queue
-        });
-      } else if (this.stdinClosed) {
-        this.cleanup();
-        process.exit(0);
-      }
-      // If queue is empty but stdin not closed, wait for more input
-    }
+const ToolCallIndicator: React.FC<ToolCallIndicatorProps> = ({ toolCall }) => {
+  const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const icon = TOOL_ICONS[toolCall.name] || TOOL_ICONS.default;
+
+  useEffect(() => {
+    if (toolCall.status !== 'running') return;
+    const timer = setInterval(() => {
+      setFrame(f => (f + 1) % TOOL_SPINNER_FRAMES.length);
+      setElapsed(Math.floor((Date.now() - toolCall.startTime) / 1000));
+    }, 500); // Slowed down from 300ms to reduce flicker
+    return () => clearInterval(timer);
+  }, [toolCall.status, toolCall.startTime]);
+
+  // Truncate args for display
+  const displayArgs = toolCall.args.length > 50 ? toolCall.args.slice(0, 47) + '...' : toolCall.args;
+
+  if (toolCall.status === 'running') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'yellow' }, TOOL_SPINNER_FRAMES[frame]),
+      h(Text, { color: 'cyan', bold: true }, ` ${toolCall.name}`),
+      h(Text, { color: 'gray' }, `(${displayArgs})`),
+      elapsed > 0 && h(Text, { color: 'gray', dimColor: true }, ` ${elapsed}s`)
+    );
   }
 
-  /**
-   * Handle user input
-   */
-  private async handleInput(input: string): Promise<void> {
-    const trimmed = input.trim();
-
-    if (!trimmed) {
-      this.prompt();
-      return;
-    }
-
-    // Pause readline while processing (interactive mode only)
-    if (this.isInteractive) {
-      this.rl.pause();
-    }
-
-    // Save to history
-    if (trimmed !== this.state.inputHistory[this.state.inputHistory.length - 1]) {
-      this.state.inputHistory.push(trimmed);
-      if (this.state.inputHistory.length > 100) {
-        this.state.inputHistory.shift();
-      }
-    }
-    this.state.historyIndex = -1;
-
-    // Check for commands
-    if (trimmed.startsWith('/')) {
-      await this.handleCommand(trimmed);
-    } else {
-      await this.chat(trimmed);
-    }
-
-    // Resume readline and prompt for next input
-    if (this.isInteractive && !this.stdinClosed) {
-      this.rl.resume();
-    }
-    this.prompt();
+  if (toolCall.status === 'completed') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'green' }, '✓'),
+      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
+      h(Text, { color: 'gray' }, `(${displayArgs})`),
+      toolCall.result && h(Text, { color: 'gray', dimColor: true }, ` → ${toolCall.result.slice(0, 30)}${toolCall.result.length > 30 ? '...' : ''}`)
+    );
   }
 
-  /**
-   * Show command suggestions
-   */
-  private showCommandSuggestions(filter?: string): void {
-    const filtered = filter
-      ? COMMAND_LIST.filter(c => c.cmd.startsWith(filter.toLowerCase()))
-      : COMMAND_LIST;
-
-    if (filtered.length === 0) {
-      console.log(chalk.red(`❌ No commands match: ${filter}`));
-      console.log(chalk.gray('Type /help to see all commands'));
-      return;
-    }
-
-    // Group by category
-    const categories = new Map<string, typeof COMMAND_LIST>();
-    filtered.forEach(c => {
-      const list = categories.get(c.cat) || [];
-      list.push(c);
-      categories.set(c.cat, list);
-    });
-
-    console.log('');
-    console.log(chalk.cyan.bold('╭─────────────────────────────────────────╮'));
-    console.log(chalk.cyan.bold('│') + chalk.white.bold('           📋 COMMANDS                   ') + chalk.cyan.bold('│'));
-    console.log(chalk.cyan.bold('├─────────────────────────────────────────┤'));
-
-    categories.forEach((cmds, cat) => {
-      cmds.forEach(c => {
-        const cmdPad = c.cmd.padEnd(14);
-        console.log(chalk.cyan.bold('│') + ` ${cat} ${chalk.green(cmdPad)} ${chalk.gray(c.desc.substring(0, 20).padEnd(20))} ` + chalk.cyan.bold('│'));
-      });
-    });
-
-    console.log(chalk.cyan.bold('╰─────────────────────────────────────────╯'));
-    console.log(chalk.gray('  Type command or partial (e.g., /pro → /providers)'));
-    console.log('');
+  if (toolCall.status === 'error') {
+    return h(Box, { marginLeft: 2, marginY: 0 },
+      h(Text, { color: 'red' }, '✗'),
+      h(Text, { color: 'cyan' }, ` ${toolCall.name}`),
+      h(Text, { color: 'red' }, ` Error`)
+    );
   }
 
-  /**
-   * Partial command matching
-   */
-  private matchCommand(input: string): string | null {
-    const cmd = input.toLowerCase();
+  return null;
+};
 
-    // Just "/" - show suggestions
-    if (cmd === '/') {
-      this.showCommandSuggestions();
-      return null;
-    }
+// Tool Calls List Component
+interface ToolCallsListProps {
+  toolCalls: ToolCallData[];
+}
 
-    // Exact match
-    if (ALL_COMMANDS.includes(cmd)) {
-      return cmd;
-    }
+const ToolCallsList: React.FC<ToolCallsListProps> = ({ toolCalls }) => {
+  if (toolCalls.length === 0) return null;
 
-    // Prefix match
-    const matches = ALL_COMMANDS.filter(c => c.startsWith(cmd));
-    if (matches.length === 1) {
-      console.log(chalk.gray(`  → ${matches[0]}`)); // Show expanded command
-      return matches[0];
-    } else if (matches.length > 1) {
-      this.showCommandSuggestions(cmd);
-      return null;
-    }
+  return h(Box, { flexDirection: 'column', marginY: 1 },
+    ...toolCalls.map((tc, i) =>
+      h(ToolCallIndicator, { key: tc.id || i, toolCall: tc })
+    )
+  );
+};
 
-    return cmd; // Let it fall through to unknown command handling
+interface StatusBarProps {
+  provider: string;
+  model: string;
+  tokens: number;
+  responseTime: string | null;
+  yolo: boolean;
+  skillsCount: number;
+}
+
+const StatusBar: React.FC<StatusBarProps> = ({ provider, model, tokens, responseTime, yolo, skillsCount }) => {
+  const providerName = PROVIDERS[provider]?.name || provider;
+
+  return h(Box, {
+    borderStyle: 'single',
+    borderColor: 'gray',
+    paddingX: 1,
+    justifyContent: 'space-between',
+    marginTop: 1
+  },
+    h(Box, { gap: 2 },
+      h(Text, { color: 'cyan', bold: true }, `🤖 ${providerName}`),
+      h(Text, { color: 'magenta' }, `📦 ${model}`),
+      skillsCount > 0 && h(Text, { color: 'blue', bold: true }, `📚 ${skillsCount} skill${skillsCount > 1 ? 's' : ''}`),
+      yolo && h(Text, { color: 'yellow' }, '⚡ YOLO')
+    ),
+    h(Box, { gap: 2 },
+      tokens > 0 && h(Text, { color: 'gray' }, `🎯 ${tokens} tokens`),
+      responseTime && h(Text, { color: 'green' }, `⏱️ ${responseTime}`)
+    )
+  );
+};
+
+interface MessageProps extends MessageData {}
+
+const Message: React.FC<MessageProps> = ({ role, content, timestamp, tokens }) => {
+  const time = timestamp ? new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '';
+
+  if (role === 'user') {
+    return h(Box, { flexDirection: 'column', marginY: 1 },
+      h(Box, { gap: 2 },
+        h(Text, { color: 'cyan', bold: true }, '┌─ You'),
+        h(Text, { color: 'gray', dimColor: true }, time)
+      ),
+      h(Box, { marginLeft: 2 },
+        h(Text, null, content)
+      )
+    );
   }
 
-  /**
-   * Handle slash commands
-   */
-  private async handleCommand(input: string): Promise<void> {
-    const [rawCmd, ...argParts] = input.split(' ');
-    const args = argParts.join(' ');
+  if (role === 'assistant') {
+    return h(Box, { flexDirection: 'column', marginY: 1 },
+      h(Box, { gap: 2 },
+        h(Text, { color: 'green', bold: true }, '┌─ Assistant'),
+        h(Text, { color: 'gray', dimColor: true }, time),
+        tokens && h(Text, { color: 'gray', dimColor: true }, `(${tokens} tokens)`)
+      ),
+      h(Box, { marginLeft: 2 },
+        h(Text, { color: 'white' }, content)
+      )
+    );
+  }
 
-    const command = this.matchCommand(rawCmd);
-    if (!command) return;
+  if (role === 'system') {
+    return h(Box, { marginY: 1, marginLeft: 2 },
+      h(Text, { color: 'gray' }, content)
+    );
+  }
 
-    switch (command) {
-      case '/help':
-        this.showHelp();
-        break;
+  if (role === 'tool') {
+    return h(Box, { marginLeft: 2 },
+      h(Text, { color: 'yellow' }, content)
+    );
+  }
 
-      case '/clear':
-        console.clear();
-        this.state.messages = [];
-        this.agent.clearHistory();
-        this.state.totalTokens = 0;
-        this.printHeader();
-        console.log(chalk.green('✅ Conversation cleared'));
-        break;
+  if (role === 'error') {
+    return h(Box, { marginY: 1 },
+      h(Text, { color: 'red', bold: true }, `❌ ${content}`)
+    );
+  }
 
-      case '/exit':
-        this.cleanup();
-        process.exit(0);
+  if (role === 'success') {
+    return h(Box, { marginY: 1 },
+      h(Text, { color: 'green', bold: true }, `✅ ${content}`)
+    );
+  }
 
-      case '/provider':
-        if (args) {
-          this.setProvider(args);
-        } else {
-          await this.selectProvider();
+  return null;
+};
+
+interface SlashMenuProps {
+  query: string;
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+}
+
+const SlashMenu: React.FC<SlashMenuProps> = ({ query, onSelect, onCancel }) => {
+  const searchTerm = query.toLowerCase().replace('/', '');
+  const filtered = SLASH_COMMANDS.filter(cmd =>
+    cmd.value.includes(searchTerm) || cmd.description.toLowerCase().includes(searchTerm)
+  );
+
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  if (filtered.length === 0) return null;
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'cyan',
+    paddingX: 1,
+    marginTop: 1
+  },
+    h(Text, { color: 'cyan', bold: true }, '📋 Commands:'),
+    h(SelectInput, {
+      items: filtered.map(c => ({ label: c.value, value: c.value, desc: c.description })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, desc }: any) =>
+        h(Box, null,
+          h(Text, { color: isSelected ? 'cyan' : 'white', bold: isSelected },
+            `${isSelected ? '▸ ' : '  '}${label.padEnd(15)}`),
+          h(Text, { color: 'gray' }, desc || '')
+        )
+    } as any)
+  );
+};
+
+interface ProviderMenuProps {
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+  current: string;
+}
+
+const ProviderMenu: React.FC<ProviderMenuProps> = ({ onSelect, onCancel, current }) => {
+  const providers = getProviderList();
+
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'magenta',
+    paddingX: 1
+  },
+    h(Text, { color: 'magenta', bold: true }, '🔌 Select Provider:'),
+    h(SelectInput, {
+      items: providers.map(p => ({
+        label: p.name,
+        value: p.id,
+        isCurrent: p.id === current
+      })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, isCurrent }: any) =>
+        h(Text, {
+          color: isSelected ? 'magenta' : (isCurrent ? 'green' : 'white'),
+          bold: isSelected
+        }, `${isSelected ? '▸ ' : '  '}${label}${isCurrent ? ' ✓' : ''}`)
+    } as any)
+  );
+};
+
+interface ModelMenuProps {
+  provider: string;
+  onSelect: (value: string) => void;
+  onCancel: () => void;
+  current: string;
+}
+
+const ModelMenu: React.FC<ModelMenuProps> = ({ provider, onSelect, onCancel, current }) => {
+  const models = getModelsForProvider(provider);
+
+  useInput((_input: string, key: InkKey) => {
+    if (key.escape) onCancel();
+  });
+
+  return h(Box, {
+    flexDirection: 'column',
+    borderStyle: 'round',
+    borderColor: 'blue',
+    paddingX: 1
+  },
+    h(Text, { color: 'blue', bold: true }, `🤖 Models for ${PROVIDERS[provider]?.name}:`),
+    h(SelectInput, {
+      items: models.map(m => ({
+        label: m.name,
+        value: m.id,
+        desc: m.description,
+        recommended: m.recommended,
+        isCurrent: m.id === current
+      })),
+      onSelect: (item: any) => onSelect(item.value),
+      itemComponent: ({ isSelected, label, desc, recommended, isCurrent }: any) =>
+        h(Box, { flexDirection: 'column' },
+          h(Box, null,
+            h(Text, {
+              color: isSelected ? 'blue' : (isCurrent ? 'green' : 'white'),
+              bold: isSelected
+            }, `${isSelected ? '▸ ' : '  '}${label}`),
+            recommended && h(Text, { color: 'yellow' }, ' ⭐'),
+            isCurrent && h(Text, { color: 'green' }, ' ✓')
+          ),
+          h(Text, { color: 'gray', dimColor: true }, `    ${desc || ''}`)
+        )
+    } as any)
+  );
+};
+
+// Main App
+interface ChatAppProps {
+  agent: AgentType;
+  initialPrompt?: string;
+}
+
+const ChatApp: React.FC<ChatAppProps> = ({ agent, initialPrompt }) => {
+  const { exit } = useApp();
+  const [query, setQuery] = useState('');
+  const [messages, setMessages] = useState<MessageData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [currentResponse, setCurrentResponse] = useState('');
+  const [_tokenCount, setTokenCount] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [responseTime, setResponseTime] = useState<string | null>(null);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const [showModelMenu, setShowModelMenu] = useState(false);
+  const [loadedSkillsCount, setLoadedSkillsCount] = useState(0);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolCallData[]>([]);
+  const startTime = useRef<number | null>(null);
+
+  // Context manager for file attachments
+  const contextManager = useRef(new ContextManager());
+
+  // Completion cycler for tab completion
+  const completionCycler = useRef(new CompletionCycler());
+
+  // Input history for up/down arrow navigation
+  const inputHistory = useRef<string[]>([]);
+  const historyIndex = useRef(-1);
+
+  // Last AI response for /copy command
+  const lastResponse = useRef<string>('');
+
+  // Buffered response for smoother rendering (reduce flicker)
+  const responseBuffer = useRef('');
+  const tokenBuffer = useRef(0);
+  const updateTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Abort controller for interrupting requests
+  const abortController = useRef<AbortController | null>(null);
+
+  // Keyboard shortcuts
+  useInput((input: string, key: InkKey) => {
+    if (key.ctrl && input === 'c') {
+      console.log('\n👋 Goodbye!\n');
+      exit();
+    }
+    if (key.ctrl && input === 'l') {
+      setMessages([]);
+      agent.clearHistory();
+      setTotalTokens(0);
+    }
+    // ESC to interrupt or close menus
+    if (key.escape) {
+      if (isLoading || isTyping) {
+        if (abortController.current) {
+          abortController.current.abort();
         }
-        break;
+        setIsLoading(false);
+        setIsTyping(false);
+        setCurrentResponse('');
+        addMessage('system', '⚠️ Interrupted by user');
+      }
+      setShowSlashMenu(false);
+      setShowProviderMenu(false);
+      setShowModelMenu(false);
+      completionCycler.current.reset();
+    }
 
-      case '/model':
-        if (args) {
-          this.agent.model = args;
-          console.log(chalk.green(`✅ Model: ${args}`));
-        } else {
-          await this.selectModel();
+    // Up arrow - previous input history
+    if (key.upArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (inputHistory.current.length > 0) {
+        if (historyIndex.current < inputHistory.current.length - 1) {
+          historyIndex.current++;
+          setQuery(inputHistory.current[inputHistory.current.length - 1 - historyIndex.current]);
         }
-        break;
+      }
+    }
 
-      case '/providers':
-        console.log(getAllProvidersQuickRef());
-        break;
+    // Down arrow - next input history
+    if (key.downArrow && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      if (historyIndex.current > 0) {
+        historyIndex.current--;
+        setQuery(inputHistory.current[inputHistory.current.length - 1 - historyIndex.current]);
+      } else if (historyIndex.current === 0) {
+        historyIndex.current = -1;
+        setQuery('');
+      }
+    }
 
-      case '/free':
-        const free = getFreeProviders();
-        console.log(chalk.cyan.bold('🆓 FREE PROVIDERS:'));
-        free.forEach(p => console.log(`  • ${p.name}: ${p.signupUrl}`));
-        break;
+    // Tab - autocomplete
+    if (key.tab && !showSlashMenu && !showProviderMenu && !showModelMenu) {
+      const completionContext: CompletionContext = {
+        cwd: process.cwd(),
+        providers: Object.keys(PROVIDERS),
+        models: Object.fromEntries(
+          Object.keys(PROVIDERS).map(p => [p, getModelsForProvider(p).map(m => m.id)])
+        ),
+        history: inputHistory.current,
+        currentProvider: agent.provider
+      };
 
-      case '/setup':
-        if (args) {
-          const guide = formatProviderGuide(args);
-          console.log(guide || chalk.red(`Provider "${args}" not found`));
-        } else {
-          console.log(chalk.gray('Usage: /setup <provider>\nExample: /setup gemini'));
+      if (!completionCycler.current.hasCompletions()) {
+        const completions = getCompletions(query, query.length, completionContext);
+        if (completions.length > 0) {
+          completionCycler.current.setCompletions(completions, query, query.length);
         }
-        break;
+      }
 
-      case '/apikey':
-        await this.handleApiKey(args);
-        break;
-
-      case '/yolo':
-        this.agent.yolo = !this.agent.yolo;
-        console.log(chalk.green(`✅ Auto-approve: ${this.agent.yolo ? 'ON ⚡' : 'OFF'}`));
-        break;
-
-      case '/config':
-        this.showConfig();
-        break;
-
-      case '/stats':
-        this.showStats();
-        break;
-
-      case '/context':
-        this.showContext();
-        break;
-
-      case '/save':
-        this.saveSession(args || 'last');
-        break;
-
-      case '/load':
-        this.loadSession(args || 'last');
-        break;
-
-      case '/resume':
-        this.loadSession('last');
-        break;
-
-      case '/sessions':
-        this.listSessions();
-        break;
-
-      case '/attach':
-        this.attachFile(args);
-        break;
-
-      case '/detach':
-        this.detachFile(args);
-        break;
-
-      case '/files':
-        this.showFiles();
-        break;
-
-      case '/preview':
-        if (args) {
-          console.log(createFilePreview(args, { maxLines: 30 }));
-        } else {
-          console.log(chalk.gray('Usage: /preview <file-path>'));
+      if (completionCycler.current.hasCompletions()) {
+        const result = key.shift
+          ? completionCycler.current.previous()
+          : completionCycler.current.next();
+        if (result.completion) {
+          setQuery(result.input);
         }
-        break;
+      }
+    }
 
-      case '/diff':
-        this.showDiff(args);
-        break;
-
-      case '/export':
-        await this.exportChat(args);
-        break;
-
-      case '/history':
-        this.searchHistory(args);
-        break;
-
-      case '/copy':
-        await this.copyLastResponse();
-        break;
-
-      case '/paste':
-        const text = await readFromClipboard();
+    // Ctrl+V - paste from clipboard
+    if (key.ctrl && input === 'v') {
+      readFromClipboard().then(text => {
         if (text) {
-          console.log(chalk.green(`📋 Pasted ${text.length} characters`));
-          await this.chat(text);
-        } else {
-          console.log(chalk.gray('Clipboard is empty'));
-        }
-        break;
-
-      case '/shortcuts':
-        this.showShortcuts();
-        break;
-
-      case '/mcp':
-        await this.handleMCP(args);
-        break;
-
-      case '/skills':
-        await this.handleSkills(args);
-        break;
-
-      default:
-        console.log(chalk.red(`❌ Unknown command: ${rawCmd}`));
-        console.log(chalk.gray('Type /help for available commands'));
-    }
-  }
-
-  /**
-   * Output token with simple formatting (like Claude Code)
-   */
-  private outputTokenSimple(token: string): void {
-    // Handle newlines with proper indentation like Claude Code
-    if (token.includes('\n')) {
-      const parts = token.split('\n');
-      parts.forEach((part, i) => {
-        process.stdout.write(part);
-        if (i < parts.length - 1) {
-          process.stdout.write('\n  '); // Indent continuation with 2 spaces
+          setQuery(prev => prev + text);
         }
       });
-    } else {
-      // Skip leading newlines to keep bullet connected to text
-      const trimmedStart = token.replace(/^\n+/, '');
-      if (trimmedStart) {
-        process.stdout.write(trimmedStart);
+    }
+
+    // Ctrl+Y - copy last response
+    if (key.ctrl && input === 'y') {
+      if (lastResponse.current) {
+        copyToClipboard(lastResponse.current).then(success => {
+          if (success) {
+            addMessage('success', '📋 Copied last response to clipboard');
+          }
+        });
       }
     }
-  }
+  });
 
-  /**
-   * Format user message - Claude Code style with separator after
-   */
-  private formatUserMessage(message: string): void {
-    // Add separator after user input like Claude Code
-    console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────────'));
-  }
+  useEffect(() => {
+    if (initialPrompt) {
+      setTimeout(() => handleSubmit(initialPrompt), 100);
+    }
+  }, []);
 
-  /**
-   * Chat with AI
-   */
-  private async chat(message: string): Promise<void> {
-    this.isProcessing = true;
+  useEffect(() => {
+    setShowSlashMenu(query.startsWith('/') && !showProviderMenu && !showModelMenu);
+  }, [query, showProviderMenu, showModelMenu]);
 
-    // Print user message in a nice box
-    this.formatUserMessage(message);
+  const addMessage = (role: MessageData['role'], content: string, extra: Partial<MessageData> = {}): void => {
+    setMessages(prev => [...prev, {
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+      ...extra
+    }]);
+  };
 
-    // Add to state
-    this.state.messages.push({ role: 'user', content: message });
+  const handleSubmit = async (input: string): Promise<void> => {
+    if (!input.trim()) return;
 
-    // Start spinner only (like Claude Code - minimal)
-    this.currentSpinner = ora({
-      text: '',
-      spinner: 'dots',
-      color: 'yellow',
-      stream: process.stdout,
-      discardStdin: false
-    }).start();
+    // Save to input history
+    if (!input.startsWith('/') || input.trim() !== inputHistory.current[inputHistory.current.length - 1]) {
+      inputHistory.current.push(input.trim());
+      if (inputHistory.current.length > 100) {
+        inputHistory.current.shift();
+      }
+    }
+    historyIndex.current = -1;
+
+    // Reset completion cycler
+    completionCycler.current.reset();
+
+    if (input.startsWith('/')) {
+      await executeCommand(input.trim());
+      setQuery('');
+      return;
+    }
+
+    setShowSlashMenu(false);
+
+    // Build context message from attached files
+    let userInput = input;
+    const ctxMsg = contextManager.current.buildContextMessage();
+    if (ctxMsg && attachedFiles.length > 0) {
+      userInput = `${ctxMsg}\n\nUser message: ${input}`;
+    }
+
+    addMessage('user', input);
+    setQuery('');
+    setIsLoading(true);
+    setIsTyping(false);
+    setCurrentResponse('');
+    setTokenCount(0);
+    startTime.current = Date.now();
 
     try {
       let fullResponse = '';
       let tokens = 0;
-      let isFirstChunk = true;
-      let responseStarted = false;
-      let inThinkBlock = false;
-      let thinkBuffer = '';
 
-      await this.agent.chat(message, {
+      // Reset buffers
+      responseBuffer.current = '';
+      tokenBuffer.current = 0;
+
+      // Flush buffer to UI (throttled updates reduce flicker)
+      const flushBuffer = (): void => {
+        if (responseBuffer.current) {
+          setCurrentResponse(responseBuffer.current);
+          setTokenCount(tokenBuffer.current);
+        }
+      };
+
+      await agent.chat(input, {
         onStart: () => {
-          this.currentSpinner?.stop();
-          responseStarted = true;
-          // Claude Code style: bullet point directly followed by text
-          process.stdout.write(chalk.green('● '));
+          setIsLoading(false);
+          setIsTyping(true);
         },
         onToken: (token: string) => {
-          // Track think block state
-          thinkBuffer += token;
+          if (!token.includes('<think>') && !token.includes('</think>')) {
+            fullResponse += token;
+            tokens++;
 
-          // Check for think tags in accumulated buffer
-          if (thinkBuffer.includes('<think>')) {
-            inThinkBlock = true;
-            thinkBuffer = thinkBuffer.split('<think>').pop() || '';
-          }
+            // Buffer tokens, update UI every 200ms (reduces flicker significantly)
+            responseBuffer.current = fullResponse;
+            tokenBuffer.current = tokens;
 
-          if (thinkBuffer.includes('</think>')) {
-            inThinkBlock = false;
-            const afterThink = thinkBuffer.split('</think>').pop() || '';
-            thinkBuffer = '';
-            // Output the part after </think> if any (trim leading whitespace)
-            const trimmed = afterThink.replace(/^[\s\n]+/, '');
-            if (trimmed) {
-              fullResponse += trimmed;
-              tokens++;
-              this.outputTokenSimple(trimmed);
+            if (!updateTimer.current) {
+              updateTimer.current = setTimeout(() => {
+                flushBuffer();
+                updateTimer.current = null;
+              }, 200);
             }
-            return;
           }
-
-          // Skip if inside think block
-          if (inThinkBlock) {
-            return;
-          }
-
-          // Skip raw think tags
-          if (token.includes('<think>') || token.includes('</think>')) {
-            return;
-          }
-
-          fullResponse += token;
-          tokens++;
-          this.outputTokenSimple(token);
         },
         onToolCall: async (tool: string, args: Record<string, unknown>) => {
-          // Claude Code style: bullet point for tool
-          console.log('');
-          const icon = TOOL_ICONS[tool] || TOOL_ICONS.default;
-          const argsStr = Object.entries(args)
-            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.substring(0, 30) : v}`)
-            .join(', ')
-            .substring(0, 50);
-          this.currentSpinner = ora({
-            text: `${chalk.yellow(tool)}(${chalk.gray(argsStr)})`,
-            spinner: 'dots',
-            color: 'yellow',
-            prefixText: chalk.green('●')
-          }).start();
+          // Flush before tool call
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
+          }
+          flushBuffer();
+
+          // Create tool call with unique ID
+          const toolCallId = `${tool}_${Date.now()}`;
+          const argsStr = JSON.stringify(args).substring(0, 100);
+          const newToolCall: ToolCallData = {
+            id: toolCallId,
+            name: tool,
+            args: argsStr,
+            status: 'running',
+            startTime: Date.now()
+          };
+
+          setActiveToolCalls(prev => [...prev, newToolCall]);
           return true;
         },
         onToolResult: (tool: string, result: unknown) => {
-          this.currentSpinner?.stopAndPersist({
-            symbol: chalk.green('●'),
-            text: `${chalk.cyan(tool)} ${chalk.gray('completed')}`
-          });
-          this.currentSpinner = null;
+          // Update tool call status to completed
+          setActiveToolCalls(prev => prev.map(tc =>
+            tc.name === tool && tc.status === 'running'
+              ? { ...tc, status: 'completed' as const, result: String(result).slice(0, 100) }
+              : tc
+          ));
         },
         onEnd: () => {
-          this.state.totalTokens += tokens;
-          this.state.lastResponse = fullResponse;
-
-          if (fullResponse) {
-            this.state.messages.push({ role: 'assistant', content: fullResponse, tokens });
+          // Clear timer and final flush
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
           }
 
-          // Simple newline to separate
-          console.log('');
+          const elapsed = ((Date.now() - (startTime.current || Date.now())) / 1000).toFixed(1);
+          setResponseTime(`${elapsed}s`);
+          setTotalTokens(prev => prev + tokens);
+          if (fullResponse) {
+            // Save for /copy command
+            lastResponse.current = fullResponse;
+            // Apply syntax highlighting to code blocks
+            const processedResponse = highlightCodeBlocks(fullResponse);
+            addMessage('assistant', processedResponse, { tokens });
+          }
+          setCurrentResponse('');
+          setIsLoading(false);
+          setIsTyping(false);
+          // Clear active tool calls after a short delay to show completion
+          setTimeout(() => setActiveToolCalls([]), 1500);
         },
         onError: (err: Error) => {
-          this.currentSpinner?.fail('Error');
-          const error = err as Error & { lastError?: { message?: string }; statusCode?: number };
-
-          // Extract meaningful error message
-          let errorMsg = err.message;
-          if (error.lastError?.message) {
-            errorMsg = error.lastError.message;
+          if (updateTimer.current) {
+            clearTimeout(updateTimer.current);
+            updateTimer.current = null;
           }
-
-          // Format based on error type
-          if (error.statusCode === 429 || errorMsg.includes('limit') || errorMsg.includes('429')) {
-            console.log(chalk.yellow(`\n⚠️ Rate limit: ${errorMsg}\n`));
-          } else if (error.statusCode === 401 || errorMsg.includes('api key') || errorMsg.includes('401')) {
-            console.log(chalk.red(`\n🔑 Auth error: ${errorMsg}\n`));
-            console.log(chalk.gray('  Use /apikey <key> to set API key'));
-          } else {
-            console.log(chalk.red(`\n❌ ${errorMsg}\n`));
-          }
+          addMessage('error', err.message);
+          setIsLoading(false);
+          setIsTyping(false);
         }
       });
     } catch (err) {
-      this.currentSpinner?.fail('Error');
-      const error = err as Error & { cause?: { message?: string }; statusCode?: number; lastError?: { message?: string } };
+      const error = err as Error;
+      addMessage('error', error.message);
+      setIsLoading(false);
+      setIsTyping(false);
+    }
+  };
 
-      // Extract the most meaningful error message
-      let errorMsg = error.message;
+  const executeCommand = async (cmd: string): Promise<void> => {
+    const [rawCommand, ...argParts] = cmd.split(' ');
+    const args = argParts.join(' ');
 
-      // For AI SDK RetryError, extract the last error message
-      if (error.lastError?.message) {
-        errorMsg = error.lastError.message;
-      }
-      // For nested errors with cause
-      if (error.cause?.message) {
-        errorMsg = error.cause.message;
-      }
+    // All supported commands for partial matching
+    const ALL_COMMANDS = [
+      '/help', '/setup', '/providers', '/provider', '/model', '/apikey', '/free',
+      '/clear', '/yolo', '/stats', '/context', '/config',
+      '/save', '/load', '/resume', '/sessions',
+      '/attach', '/detach', '/files', '/preview', '/diff',
+      '/export', '/history', '/copy', '/paste', '/shortcuts',
+      '/mcp', '/skills', '/exit'
+    ];
 
-      // Format rate limit errors nicely
-      if (error.statusCode === 429 || errorMsg.includes('limit') || errorMsg.includes('429')) {
-        console.log(chalk.yellow(`\n⚠️ Rate limit: ${errorMsg}\n`));
-      } else if (error.statusCode === 401 || errorMsg.includes('api key') || errorMsg.includes('401')) {
-        console.log(chalk.red(`\n🔑 Auth error: ${errorMsg}\n`));
-        console.log(chalk.gray('  Use /apikey <key> to set API key'));
-      } else {
-        console.log(chalk.red(`\n❌ Error: ${errorMsg}\n`));
+    // Partial command matching
+    let command = rawCommand.toLowerCase();
+    if (!ALL_COMMANDS.includes(command)) {
+      // Try prefix matching
+      const matches = ALL_COMMANDS.filter(c => c.startsWith(command));
+      if (matches.length === 1) {
+        command = matches[0]; // Unambiguous match
+      } else if (matches.length > 1) {
+        addMessage('error', `Ambiguous command: ${rawCommand}\nDid you mean: ${matches.join(', ')}`);
+        return;
       }
+      // If no matches, let it fall through to default case
     }
 
-    this.isProcessing = false;
-    this.currentSpinner = null;
-  }
+    switch (command) {
+      case '/help':
+        addMessage('system', `
+📚 COMMANDS:
 
-  /**
-   * Select provider using enquirer
-   */
-  private async selectProvider(): Promise<void> {
-    const providers = getProviderList();
-    const enquirer = new Enquirer();
-
-    try {
-      const response = await enquirer.prompt({
-        type: 'select',
-        name: 'provider',
-        message: '🔌 Select Provider',
-        choices: providers.map(p => ({
-          name: p.id,
-          message: `${p.name}${p.id === this.agent.provider ? chalk.green(' ✓') : ''}`
-        }))
-      }) as { provider: string };
-
-      this.setProvider(response.provider);
-    } catch {
-      // User cancelled
-    }
-  }
-
-  /**
-   * Set provider
-   */
-  private setProvider(id: string): void {
-    const p = PROVIDERS[id];
-    if (p) {
-      this.agent.provider = id;
-      this.agent.baseUrl = p.baseUrl;
-
-      // Load API key
-      const keyFile = path.join(os.homedir(), p.apiKeyFile || `.${id}_api_key`);
-      if (fs.existsSync(keyFile)) {
-        try {
-          this.agent.apiKey = fs.readFileSync(keyFile, 'utf-8').trim();
-        } catch {}
-      }
-
-      const firstModel = p.models?.[0];
-      this.agent.model = typeof firstModel === 'object' ? firstModel.id : firstModel;
-      console.log(chalk.green(`✅ Provider: ${p.name}, Model: ${this.agent.model}`));
-    } else {
-      console.log(chalk.red(`❌ Provider not found: ${id}`));
-    }
-  }
-
-  /**
-   * Select model using enquirer
-   */
-  private async selectModel(): Promise<void> {
-    const models = getModelsForProvider(this.agent.provider);
-    const enquirer = new Enquirer();
-
-    try {
-      const response = await enquirer.prompt({
-        type: 'select',
-        name: 'model',
-        message: '🤖 Select Model',
-        choices: models.map(m => ({
-          name: m.id,
-          message: `${m.name}${m.recommended ? chalk.yellow(' ⭐') : ''}${m.id === this.agent.model ? chalk.green(' ✓') : ''}`
-        }))
-      }) as { model: string };
-
-      this.agent.model = response.model;
-      console.log(chalk.green(`✅ Model: ${response.model}`));
-    } catch {
-      // User cancelled
-    }
-  }
-
-  /**
-   * Handle API key
-   */
-  private async handleApiKey(key: string): Promise<void> {
-    const info = PROVIDER_INFO[this.agent.provider];
-    if (key && info) {
-      const keyFile = path.join(os.homedir(), `.${this.agent.provider}_api_key`);
-      try {
-        fs.writeFileSync(keyFile, key.trim());
-        fs.chmodSync(keyFile, 0o600);
-        this.agent.apiKey = key.trim();
-        console.log(chalk.green(`✅ API key saved for ${info.name}`));
-      } catch (e) {
-        console.log(chalk.red(`❌ ${(e as Error).message}`));
-      }
-    } else if (info) {
-      console.log(chalk.cyan(`🔐 Set API key:`));
-      console.log(chalk.gray(`  /apikey YOUR_KEY`));
-      console.log(chalk.gray(`  Get key: ${info.apiKeyUrl}`));
-    }
-  }
-
-  /**
-   * Show help
-   */
-  private showHelp(): void {
-    console.log(`
-${chalk.cyan.bold('📚 COMMANDS:')}
-
-${chalk.yellow('🔌 PROVIDER:')}
+🔌 PROVIDER:
   /setup <name>    Setup API key with guide
   /providers       List all providers
   /provider        Switch provider
@@ -810,482 +880,697 @@ ${chalk.yellow('🔌 PROVIDER:')}
   /apikey <key>    Set API key
   /free            Show FREE providers
 
-${chalk.yellow('💬 CHAT:')}
+💬 CHAT:
   /clear           Clear conversation
   /yolo            Toggle auto-approve
   /stats           Session statistics
   /context         Show project context
   /config          Show configuration
 
-${chalk.yellow('💾 SESSION:')}
+💾 SESSION (Memory):
   /save [name]     Save current session
   /load [name]     Load saved session
   /resume          Resume last session
   /sessions        List all saved sessions
 
-${chalk.yellow('📎 FILES:')}
+📎 FILES & CONTEXT:
   /attach <file>   Attach file to context
   /detach <file>   Remove file from context
   /files           List attached files
   /preview <file>  Preview file content
   /diff <f1> <f2>  Show diff between files
 
-${chalk.yellow('📤 EXPORT:')}
+📤 EXPORT & HISTORY:
   /export [fmt]    Export chat (markdown/json/html/text)
   /history [query] Search conversation history
   /copy            Copy last response
   /paste           Paste from clipboard
 
-${chalk.yellow('🔌 MCP:')}
-  /mcp             MCP server management
+🛠️ TOOLS (AI can use):
+  bash, read, write, edit, glob, grep, web_fetch
+  + MCP tools from connected servers
 
-${chalk.yellow('📚 SKILLS:')}
-  /skills          Skills management
+🔌 MCP (Model Context Protocol):
+  /mcp              List connected servers
+  /mcp connect      Connect to configured servers
+  /mcp disconnect   Disconnect all
+  /mcp tools        List MCP tools
+  /mcp browse       Browse popular MCP servers
+  /mcp search <q>   Search MCP servers
+  /mcp install <id> Install MCP server
+  /mcp marketplace  View online marketplaces
 
-${chalk.gray('Press Ctrl+C to exit')}
-`);
-  }
+📚 SKILLS:
+  /skills           List available skills
+  /skills load <id> Load a skill
+  /skills create    Create new skill
 
-  /**
-   * Show config
-   */
-  private showConfig(): void {
-    const providerName = PROVIDERS[this.agent.provider]?.name || this.agent.provider;
-    console.log(chalk.cyan.bold('⚙️ CONFIG:'));
-    console.log(`  Provider: ${providerName}`);
-    console.log(`  Model: ${this.agent.model}`);
-    console.log(`  YOLO: ${this.agent.yolo ? 'ON' : 'OFF'}`);
-    console.log(`  Tokens: ${this.state.totalTokens}`);
-    console.log(`  Context: ${this.agent.projectContext?.file || 'None'}`);
-  }
+⌨️ SHORTCUTS:
+  Ctrl+C      Exit
+  Ctrl+L      Clear screen
+  Ctrl+Y      Copy last response
+  Tab         Auto-complete
+  Up/Down     Input history
+  ESC         Interrupt/Close menus
+  /shortcuts  Full shortcut list
+        `);
+        break;
 
-  /**
-   * Show stats
-   */
-  private showStats(): void {
-    const uptime = Math.floor((Date.now() - this.agent.stats.startTime) / 1000);
-    const mins = Math.floor(uptime / 60);
-    const secs = uptime % 60;
+      case '/clear':
+        setMessages([]);
+        agent.clearHistory();
+        setTotalTokens(0);
+        setResponseTime(null);
+        addMessage('success', 'Conversation cleared');
+        break;
 
-    console.log(chalk.cyan.bold('📊 SESSION STATS:'));
-    console.log(`  ├─ Requests: ${this.agent.stats.requests}`);
-    console.log(`  ├─ Tool Calls: ${this.agent.stats.toolCalls}`);
-    console.log(`  ├─ Total Tokens: ${this.agent.stats.totalTokens}`);
-    console.log(`  ├─ Uptime: ${mins}m ${secs}s`);
-    console.log(`  └─ Model: ${this.agent.model}`);
-  }
-
-  /**
-   * Show context
-   */
-  private showContext(): void {
-    if (this.agent.projectContext) {
-      console.log(chalk.cyan.bold(`📄 PROJECT CONTEXT (${this.agent.projectContext.file}):`));
-      console.log(this.agent.projectContext.content.substring(0, 500));
-      if (this.agent.projectContext.content.length > 500) {
-        console.log(chalk.gray('... (truncated)'));
-      }
-    } else {
-      console.log(chalk.gray('📄 No project context file found.'));
-      console.log(chalk.gray('\nCreate one of: ZESBE.md, CLAUDE.md, GEMINI.md, AI.md'));
-    }
-  }
-
-  /**
-   * Save session
-   */
-  private saveSession(name: string): void {
-    const result = this.agent.saveSession(name);
-    if (result.success) {
-      console.log(chalk.green(`✅ Session saved: ${name}`));
-      console.log(chalk.gray(`   Path: ${result.path}`));
-    } else {
-      console.log(chalk.red(`❌ Save failed: ${result.error}`));
-    }
-  }
-
-  /**
-   * Load session
-   */
-  private loadSession(name: string): void {
-    const result = this.agent.loadSession(name);
-    if (result.success) {
-      console.log(chalk.green(`✅ Session loaded: ${name}`));
-      console.log(chalk.gray(`   Messages: ${result.messageCount}`));
-      console.log(chalk.gray(`   Summary: ${result.summary}`));
-    } else {
-      console.log(chalk.yellow(`No session found: ${name}`));
-    }
-  }
-
-  /**
-   * List sessions
-   */
-  private listSessions(): void {
-    if (!fs.existsSync(SESSION_DIR)) {
-      console.log(chalk.gray('No saved sessions'));
-      return;
-    }
-
-    const sessions = fs.readdirSync(SESSION_DIR)
-      .filter(f => f.endsWith('.json'))
-      .slice(0, 10);
-
-    if (sessions.length === 0) {
-      console.log(chalk.gray('No saved sessions'));
-      return;
-    }
-
-    console.log(chalk.cyan.bold('📚 SAVED SESSIONS:'));
-    sessions.forEach(s => {
-      console.log(`  • ${s.replace('.json', '')}`);
-    });
-    console.log(chalk.gray('\nUse /load <name> to load'));
-  }
-
-  /**
-   * Attach file
-   */
-  private attachFile(filePath: string): void {
-    if (!filePath) {
-      console.log(chalk.gray('Usage: /attach <file-path>'));
-      return;
-    }
-
-    const file = this.contextManager.attachFile(filePath);
-    if (file) {
-      this.state.attachedFiles = this.contextManager.getAttachedFiles().map(f => f.path);
-      console.log(chalk.green(`📎 Attached: ${file.name} (${file.tokens} tokens, ${file.language})`));
-    } else {
-      console.log(chalk.red(`❌ Failed to attach: ${filePath}`));
-    }
-  }
-
-  /**
-   * Detach file
-   */
-  private detachFile(filePath: string): void {
-    if (!filePath) {
-      console.log(chalk.gray('Usage: /detach <file-path|all>'));
-      return;
-    }
-
-    if (filePath === 'all') {
-      this.contextManager.detachAll();
-      this.state.attachedFiles = [];
-      console.log(chalk.green('📎 All files detached'));
-    } else if (this.contextManager.detachFile(filePath)) {
-      this.state.attachedFiles = this.contextManager.getAttachedFiles().map(f => f.path);
-      console.log(chalk.green(`📎 Detached: ${filePath}`));
-    } else {
-      console.log(chalk.red(`❌ File not attached: ${filePath}`));
-    }
-  }
-
-  /**
-   * Show files
-   */
-  private showFiles(): void {
-    const files = this.contextManager.getAttachedFiles();
-    if (files.length === 0) {
-      console.log(chalk.gray('📁 No files attached'));
-      console.log(chalk.gray('Use /attach <file> to add files'));
-    } else {
-      const info = this.contextManager.getContextInfo();
-      console.log(formatContextInfo(info));
-    }
-  }
-
-  /**
-   * Show diff
-   */
-  private showDiff(args: string): void {
-    const parts = args.split(' ');
-    if (parts.length < 2) {
-      console.log(chalk.gray('Usage: /diff <file1> <file2>'));
-      return;
-    }
-
-    try {
-      const old = fs.readFileSync(parts[0], 'utf-8');
-      const newContent = fs.readFileSync(parts[1], 'utf-8');
-      console.log(createFileDiff(parts[0], parts[1], old, newContent));
-    } catch (e) {
-      console.log(chalk.red(`❌ ${(e as Error).message}`));
-    }
-  }
-
-  /**
-   * Export chat
-   */
-  private async exportChat(format: string): Promise<void> {
-    const fmt = (format || 'markdown') as ExportFormat;
-    const chatMessages: ChatMessage[] = this.state.messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-        timestamp: new Date(),
-        tokens: m.tokens
-      }));
-
-    if (chatMessages.length === 0) {
-      console.log(chalk.gray('No conversation to export'));
-      return;
-    }
-
-    const conv = saveConversation(chatMessages, this.agent.provider, this.agent.model);
-    const exported = exportConversation(conv, fmt);
-    const ext = fmt === 'markdown' ? 'md' : fmt;
-    const exportPath = path.join(process.cwd(), `chat-${Date.now()}.${ext}`);
-    fs.writeFileSync(exportPath, exported);
-    console.log(chalk.green(`📤 Exported to: ${exportPath}`));
-  }
-
-  /**
-   * Search history
-   */
-  private searchHistory(query: string): void {
-    if (query) {
-      const results = searchConversations(query);
-      console.log(formatSearchResults(results, query));
-    } else {
-      const convList = listConversations(10);
-      console.log(formatConversationList(convList));
-    }
-  }
-
-  /**
-   * Copy last response
-   */
-  private async copyLastResponse(): Promise<void> {
-    if (!this.state.lastResponse) {
-      console.log(chalk.gray('No response to copy'));
-      return;
-    }
-
-    const success = await copyToClipboard(this.state.lastResponse);
-    if (success) {
-      console.log(chalk.green('📋 Last response copied to clipboard'));
-    } else {
-      console.log(chalk.red('❌ Failed to copy to clipboard'));
-    }
-  }
-
-  /**
-   * Show shortcuts
-   */
-  private showShortcuts(): void {
-    console.log(chalk.cyan.bold('⌨️ KEYBOARD SHORTCUTS:'));
-    console.log('');
-    console.log('  Ctrl+C      Exit / Interrupt');
-    console.log('  /copy       Copy last response');
-    console.log('  /paste      Paste from clipboard');
-    console.log('');
-    console.log(chalk.gray('Note: Up/Down history not available in this mode'));
-  }
-
-  /**
-   * Handle MCP commands
-   */
-  private async handleMCP(args: string): Promise<void> {
-    const mcpManager = getMCPManager();
-    const [cmd, ...rest] = args.split(' ');
-    const mcpArgs = rest.join(' ');
-
-    switch (cmd) {
-      case '':
-      case 'list':
-        const servers = mcpManager.listServers();
-        if (servers.length === 0) {
-          console.log(chalk.gray('🔌 No MCP servers connected'));
-          console.log(chalk.gray('Edit ~/.zesbe/mcp.json, then /mcp connect'));
+      case '/model':
+        if (args) {
+          agent.model = args;
+          addMessage('success', `Model: ${args}`);
         } else {
-          console.log(chalk.cyan.bold('🔌 MCP SERVERS:'));
-          servers.forEach(s => {
-            console.log(`  • ${s.name} (${s.tools} tools)`);
-          });
+          setShowModelMenu(true);
         }
         break;
 
-      case 'connect':
-        const spinner = ora('Connecting to MCP servers...').start();
-        const results = await mcpManager.connectAll();
-        spinner.stop();
-        results.forEach(r => {
-          if (r.success) {
-            console.log(chalk.green(`✅ ${r.name}: ${r.tools?.length || 0} tools`));
-          } else {
-            console.log(chalk.red(`❌ ${r.name}: ${r.error}`));
+      case '/provider':
+        if (args) {
+          const p = PROVIDERS[args];
+          if (p) {
+            agent.provider = args;
+            agent.baseUrl = p.baseUrl;
+            agent.model = p.models?.[0]?.id || agent.model;
+            addMessage('success', `Provider: ${p.name}, Model: ${agent.model}`);
           }
-        });
-        break;
-
-      case 'disconnect':
-        await mcpManager.disconnectAll();
-        console.log(chalk.green('✅ Disconnected from all MCP servers'));
-        break;
-
-      case 'tools':
-        const tools = mcpManager.getToolsForAI();
-        if (tools.length === 0) {
-          console.log(chalk.gray('No MCP tools. Run /mcp connect first'));
         } else {
-          console.log(chalk.cyan.bold('🔧 MCP TOOLS:'));
-          tools.forEach(t => console.log(`  • ${t.function.name}`));
+          setShowProviderMenu(true);
         }
         break;
 
-      case 'browse':
-        console.log(chalk.cyan.bold('🏪 POPULAR MCP SERVERS:'));
-        POPULAR_MCP_SERVERS.slice(0, 8).forEach(s => {
-          console.log(`  ${s.official ? '⭐' : '•'} ${s.id} - ${s.name}`);
-          console.log(chalk.gray(`    ${s.description}`));
-        });
-        console.log(chalk.gray('\nUse /mcp install <id> to add'));
+      case '/providers':
+        addMessage('system', getAllProvidersQuickRef());
         break;
 
-      case 'search':
-        if (!mcpArgs) {
-          console.log(chalk.gray('Usage: /mcp search <query>'));
-          return;
-        }
-        const searchResults = searchServers(mcpArgs);
-        if (searchResults.length === 0) {
-          console.log(chalk.yellow(`No servers found for "${mcpArgs}"`));
+      case '/free':
+        const free = getFreeProviders();
+        addMessage('system', `🆓 FREE PROVIDERS:\n${free.map(p =>
+          `• ${p.name}: ${p.signupUrl}`
+        ).join('\n')}`);
+        break;
+
+      case '/setup':
+        if (args) {
+          const guide = formatProviderGuide(args);
+          addMessage('system', guide || `Provider "${args}" not found`);
         } else {
-          console.log(chalk.cyan.bold(`🔍 RESULTS (${searchResults.length}):`));
-          searchResults.slice(0, 5).forEach(s => {
-            console.log(`  • ${s.id} - ${s.name}`);
-          });
+          addMessage('system', 'Usage: /setup <provider>\nExample: /setup gemini');
         }
         break;
 
-      case 'install':
-        if (!mcpArgs) {
-          console.log(chalk.gray('Usage: /mcp install <server-id>'));
-          return;
+      case '/apikey':
+        const info = PROVIDER_INFO[agent.provider];
+        if (args && info) {
+          const keyFile = path.join(os.homedir(), `.${agent.provider}_api_key`);
+          try {
+            fs.writeFileSync(keyFile, args.trim());
+            fs.chmodSync(keyFile, 0o600);
+            agent.apiKey = args.trim();
+            addMessage('success', `API key saved for ${info.name}`);
+          } catch (e) {
+            const error = e as Error;
+            addMessage('error', error.message);
+          }
+        } else if (info) {
+          addMessage('system', `🔐 Set API key:\n/apikey YOUR_KEY\n\nGet key: ${info.apiKeyUrl}`);
         }
-        const server = getServerById(mcpArgs);
-        if (!server) {
-          console.log(chalk.red(`Server not found: ${mcpArgs}`));
-          return;
-        }
-        if (server.install.requiresPath || server.install.requiresToken) {
-          console.log(chalk.yellow(`⚠️ This server requires manual config`));
-          console.log(chalk.gray(`Edit ~/.zesbe/mcp.json`));
+        break;
+
+      case '/yolo':
+        agent.yolo = !agent.yolo;
+        addMessage('success', `Auto-approve: ${agent.yolo ? 'ON ⚡' : 'OFF'}`);
+        break;
+
+      case '/config':
+        addMessage('system', `⚙️ CONFIG:
+Provider: ${PROVIDERS[agent.provider]?.name || agent.provider}
+Model: ${agent.model}
+YOLO: ${agent.yolo ? 'ON' : 'OFF'}
+Tokens: ${totalTokens}
+Project Context: ${agent.projectContext ? agent.projectContext.file : 'None'}`);
+        break;
+
+      case '/stats':
+        const uptime = Math.floor((Date.now() - agent.stats.startTime) / 1000);
+        const mins = Math.floor(uptime / 60);
+        const secs = uptime % 60;
+        addMessage('system', `📊 SESSION STATS:
+├─ Requests: ${agent.stats.requests}
+├─ Tool Calls: ${agent.stats.toolCalls}
+├─ Total Tokens: ${agent.stats.totalTokens}
+├─ Uptime: ${mins}m ${secs}s
+├─ Provider: ${PROVIDERS[agent.provider]?.name}
+├─ Model: ${agent.model}
+└─ Project: ${agent.projectContext?.file || 'No context file'}`);
+        break;
+
+      case '/context':
+        if (agent.projectContext) {
+          addMessage('system', `📄 PROJECT CONTEXT (${agent.projectContext.file}):\n\n${agent.projectContext.content.substring(0, 500)}${agent.projectContext.content.length > 500 ? '...' : ''}`);
         } else {
-          const config = mcpManager.loadConfig();
-          config.mcpServers[server.id] = generateInstallConfig(server);
-          mcpManager.saveConfig(config);
-          console.log(chalk.green(`✅ ${server.name} added! Run /mcp connect`));
+          addMessage('system', `📄 No project context file found.
+
+Create one of these files in your project root:
+• ZESBE.md - Custom instructions for this CLI
+• CLAUDE.md - Compatible with Claude Code
+• GEMINI.md - Compatible with Gemini CLI
+• AI.md - Generic AI context`);
         }
         break;
 
-      default:
-        console.log(chalk.gray('Usage: /mcp [list|connect|disconnect|tools|browse|search|install]'));
-    }
-  }
-
-  /**
-   * Handle skills commands
-   */
-  private async handleSkills(args: string): Promise<void> {
-    const skillsManager = getSkillsManager();
-    const [cmd, ...rest] = args.split(' ');
-    const skillArgs = rest.join(' ');
-
-    switch (cmd) {
-      case '':
-      case 'list':
-        skillsManager.scanSkills();
-        const available = skillsManager.getAvailableSkills();
-        const loaded = skillsManager.getLoadedSkills();
-
-        if (available.length === 0) {
-          console.log(chalk.gray('📚 No skills found'));
-          console.log(chalk.gray('Create skills in ~/.zesbe/skills/ or .skills/'));
+      case '/save':
+        const saveName = args || 'last';
+        const saveResult = agent.saveSession(saveName);
+        if (saveResult.success) {
+          addMessage('success', `Session saved: ${saveName}\nPath: ${saveResult.path}`);
         } else {
-          console.log(chalk.cyan.bold('📚 SKILLS:'));
-          available.forEach(s => {
-            const isLoaded = loaded.find(l => l.id === s.id);
-            console.log(`  ${isLoaded ? '✅' : '⬚'} ${s.id} - ${s.description || s.name}`);
-          });
+          addMessage('error', `Save failed: ${saveResult.error}`);
         }
         break;
 
-      case 'load':
-        if (!skillArgs) {
-          console.log(chalk.gray('Usage: /skills load <id>'));
-          return;
-        }
-        const loadResult = skillsManager.loadSkill(skillArgs);
+      case '/load':
+        const loadName = args || 'last';
+        const loadResult = agent.loadSession(loadName);
         if (loadResult.success) {
-          this.agent.refreshSystemPrompt();
-          console.log(chalk.green(`✅ Loaded: ${loadResult.skill?.name}`));
+          addMessage('success', `Session loaded: ${loadName}
+📅 Saved: ${new Date(loadResult.savedAt || '').toLocaleString()}
+💬 Messages: ${loadResult.messageCount}
+📝 Summary: ${loadResult.summary}`);
         } else {
-          console.log(chalk.red(`❌ ${loadResult.error}`));
+          addMessage('error', `Load failed: ${loadResult.error}`);
         }
         break;
 
-      case 'unload':
-        if (!skillArgs) {
-          console.log(chalk.gray('Usage: /skills unload <id>'));
-          return;
-        }
-        if (skillsManager.unloadSkill(skillArgs)) {
-          this.agent.refreshSystemPrompt();
-          console.log(chalk.green(`✅ Unloaded: ${skillArgs}`));
+      case '/resume':
+        const resumeResult = agent.loadSession('last');
+        if (resumeResult.success) {
+          addMessage('success', `♻️ Session resumed!
+📅 From: ${new Date(resumeResult.savedAt || '').toLocaleString()}
+💬 Messages: ${resumeResult.messageCount}
+📝 ${resumeResult.summary}`);
         } else {
-          console.log(chalk.red(`❌ Skill not loaded: ${skillArgs}`));
+          addMessage('system', `No previous session found. Start a new conversation!`);
         }
         break;
 
-      case 'loaded':
-        const loadedSkills = skillsManager.getLoadedSkills();
-        if (loadedSkills.length === 0) {
-          console.log(chalk.gray('No skills loaded'));
+      case '/sessions':
+        const sessions = listSavedSessions();
+        if (sessions.length === 0) {
+          addMessage('system', 'No saved sessions found.\nUse /save to save current session.');
         } else {
-          console.log(chalk.cyan.bold('📚 LOADED SKILLS:'));
-          loadedSkills.forEach(s => console.log(`  • ${s.name}`));
+          const list = sessions.slice(0, 10).map(s =>
+            `• ${s.name} (${new Date(s.modified).toLocaleDateString()})\n  ${s.summary}`
+          ).join('\n');
+          addMessage('system', `📚 SAVED SESSIONS:\n\n${list}\n\nUse /load <name> to load a session`);
         }
         break;
 
-      default:
-        console.log(chalk.gray('Usage: /skills [list|load|unload|loaded]'));
-    }
-  }
+      case '/skills':
+        const skillsManager = getSkillsManager();
+        const skillCmd = args.split(' ')[0];
+        const skillArgs = args.split(' ').slice(1).join(' ');
 
-  /**
-   * Start the CLI
-   */
-  async start(initialPrompt?: string): Promise<void> {
-    this.printHeader();
+        if (skillCmd === 'list' || !skillCmd) {
+          skillsManager.scanSkills();
+          const available = skillsManager.getAvailableSkills();
+          const loaded = skillsManager.getLoadedSkills();
 
-    if (initialPrompt) {
-      await this.chat(initialPrompt);
-    }
+          if (available.length === 0) {
+            addMessage('system', `📚 SKILLS: No skills found.
 
-    if (!this.isInteractive) {
-      // For piped input, wait for all input to be collected before processing
-      await new Promise<void>((resolve) => {
-        if (this.stdinClosed) {
-          resolve();
+Create a skill:
+  /skills create <name>
+
+Skills directories:
+  ~/.zesbe/skills/     (user skills)
+  .skills/             (project skills)
+
+Each skill needs a SKILL.md file with:
+---
+name: My Skill
+description: What it does
+---
+
+Instructions for AI...`);
+          } else {
+            const list = available.map(s => {
+              const isLoaded = loaded.find(l => l.id === s.id);
+              return `${isLoaded ? '✅' : '⬚'} ${s.id} - ${s.description || s.name}\n   (${s.source})`;
+            }).join('\n');
+            addMessage('system', `📚 SKILLS:\n\n${list}\n\n/skills load <id> to load\n/skills unload <id> to unload`);
+          }
+        } else if (skillCmd === 'load' && skillArgs) {
+          const result = skillsManager.loadSkill(skillArgs);
+          if (result.success) {
+            agent.refreshSystemPrompt();
+            setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
+            if (result.alreadyLoaded) {
+              addMessage('system', `Skill "${skillArgs}" already loaded`);
+            } else {
+              addMessage('success', `✅ Loaded skill: ${result.skill?.name}\n${result.skill?.description}\n\n💡 The AI can now use this skill! Try asking:\n"${result.skill?.name} help me with..."`);
+            }
+          } else {
+            addMessage('error', `Failed to load skill: ${result.error}`);
+          }
+        } else if (skillCmd === 'unload' && skillArgs) {
+          if (skillsManager.unloadSkill(skillArgs)) {
+            agent.refreshSystemPrompt();
+            setLoadedSkillsCount(skillsManager.getLoadedSkills().length);
+            addMessage('success', `Unloaded skill: ${skillArgs}`);
+          } else {
+            addMessage('error', `Skill "${skillArgs}" is not loaded`);
+          }
+        } else if (skillCmd === 'create' && skillArgs) {
+          const result = skillsManager.createSkillTemplate(skillArgs);
+          if (result.success) {
+            addMessage('success', `✅ Created skill template: ${skillArgs}\nPath: ${result.path}\n\nEdit SKILL.md to customize.`);
+          } else {
+            addMessage('error', `Failed to create skill: ${result.error}`);
+          }
+        } else if (skillCmd === 'loaded') {
+          const loaded = skillsManager.getLoadedSkills();
+          if (loaded.length === 0) {
+            addMessage('system', 'No skills currently loaded. Use /skills load <id>');
+          } else {
+            const list = loaded.map(s => `• ${s.name}: ${s.description}`).join('\n');
+            addMessage('system', `📚 LOADED SKILLS:\n\n${list}`);
+          }
+        } else if (skillCmd === 'refresh') {
+          skillsManager.scanSkills();
+          addMessage('success', `Rescanned skills directories`);
         } else {
-          // Wait for close event
-          this.rl.once('close', () => resolve());
-        }
-      });
-    }
+          addMessage('system', `📚 SKILLS Commands:
+  /skills              List available skills
+  /skills load <id>    Load a skill
+  /skills unload <id>  Unload a skill
+  /skills loaded       Show loaded skills
+  /skills create <id>  Create new skill template
+  /skills refresh      Rescan skills directories
 
-    this.prompt();
+Skills directories:
+  ~/.zesbe/skills/     (user skills)
+  .skills/             (project skills)`);
+        }
+        break;
+
+      case '/mcp':
+        const mcpManager = getMCPManager();
+        const mcpCmd = args.split(' ')[0];
+        const mcpArgs = args.split(' ').slice(1).join(' ');
+
+        if (mcpCmd === 'list' || !mcpCmd) {
+          const servers = mcpManager.listServers();
+          if (servers.length === 0) {
+            addMessage('system', `🔌 MCP: No servers connected.
+
+To configure MCP servers, edit:
+~/.zesbe/mcp.json
+
+Example config:
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "~/"]
+    }
   }
 }
 
-/**
- * Export start function
- */
+Then run: /mcp connect`);
+          } else {
+            const list = servers.map(s =>
+              `• ${s.name} (${s.tools} tools)\n  ${s.toolNames.join(', ')}`
+            ).join('\n');
+            addMessage('system', `🔌 MCP SERVERS:\n\n${list}`);
+          }
+        } else if (mcpCmd === 'connect') {
+          addMessage('system', '🔌 Connecting to MCP servers...');
+          const results = await mcpManager.connectAll();
+          const summary = results.map(r =>
+            r.success ? `✅ ${r.name}: ${r.tools?.length || 0} tools` : `❌ ${r.name}: ${r.error}`
+          ).join('\n');
+          addMessage('system', `MCP Connection Results:\n${summary || 'No servers configured'}`);
+        } else if (mcpCmd === 'disconnect') {
+          await mcpManager.disconnectAll();
+          addMessage('success', 'Disconnected from all MCP servers');
+        } else if (mcpCmd === 'tools') {
+          const tools = mcpManager.getToolsForAI();
+          if (tools.length === 0) {
+            addMessage('system', 'No MCP tools available. Run /mcp connect first.');
+          } else {
+            const list = tools.map(t => `• ${t.function.name}`).join('\n');
+            addMessage('system', `🔧 MCP TOOLS:\n\n${list}`);
+          }
+        } else if (mcpCmd === 'browse') {
+          const list = POPULAR_MCP_SERVERS.slice(0, 10).map(s =>
+            `${s.official ? '⭐' : '•'} ${s.id} - ${s.name} by ${s.author}\n   ${s.description}\n   Category: ${s.category} | ⭐ ${s.stars} stars`
+          ).join('\n\n');
+          addMessage('system', `🏪 POPULAR MCP SERVERS (Curated List):\n\n${list}\n\n📦 QUICK INSTALL:\n  /mcp install playwright    # Browser automation\n  /mcp install github        # GitHub integration\n  /mcp install filesystem    # File operations\n\n🔍 MORE OPTIONS:\n  /mcp search <query>        # Search servers\n  /mcp marketplace           # External marketplaces`);
+        } else if (mcpCmd === 'search') {
+          if (!mcpArgs) {
+            addMessage('system', 'Usage: /mcp search <query>\n\nExample: /mcp search database');
+            break;
+          }
+          const results = searchServers(mcpArgs);
+          if (results.length === 0) {
+            addMessage('system', `No servers found for "${mcpArgs}"`);
+          } else {
+            const list = results.slice(0, 8).map(s =>
+              `${s.official ? '⭐' : '•'} ${s.id} - ${s.name}\n   ${s.description}`
+            ).join('\n\n');
+            addMessage('system', `🔍 SEARCH RESULTS (${results.length}):\n\n${list}\n\nUse /mcp install <id> to add`);
+          }
+        } else if (mcpCmd === 'install') {
+          if (!mcpArgs) {
+            addMessage('system', 'Usage: /mcp install <server-id>\n\nExample: /mcp install filesystem\n\nSee /mcp browse for available servers');
+            break;
+          }
+          const server = getServerById(mcpArgs);
+          if (!server) {
+            addMessage('error', `Server "${mcpArgs}" not found. Use /mcp browse to see available servers.`);
+            break;
+          }
+
+          addMessage('system', `📦 Installing: ${server.name}\n${server.description}\n`);
+
+          // Check if requires path or token
+          if (server.install.requiresPath) {
+            addMessage('system', `⚠️ This server requires a PATH parameter.\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args).replace('{PATH}', '"/path/to/directory"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+          } else if (server.install.requiresToken) {
+            addMessage('system', `⚠️ This server requires: ${server.install.requiresToken}\n\nExample installation in mcp.json:\n{\n  "mcpServers": {\n    "${server.id}": {\n      "command": "${server.install.command}",\n      "args": ${JSON.stringify(server.install.args)},\n      "env": ${JSON.stringify(server.install.env, null, 2).replace('{TOKEN}', '"your-token-here"')}\n    }\n  }\n}\n\nEdit ~/.zesbe/mcp.json then run /mcp connect`);
+          } else {
+            // Auto-install (no requirements)
+            const config = mcpManager.loadConfig();
+            config.mcpServers[server.id] = generateInstallConfig(server);
+            mcpManager.saveConfig(config);
+            addMessage('success', `✅ ${server.name} added to config!\n\nRun /mcp connect to activate`);
+          }
+        } else if (mcpCmd === 'marketplace') {
+          const list = MARKETPLACE_LINKS.map(m =>
+            `${m.icon} ${m.name}\n   ${m.description}\n   ${m.url}`
+          ).join('\n\n');
+          addMessage('system', `🏪 MCP MARKETPLACES:\n\n${list}\n\nBrowse thousands more servers online!\n\n💡 To install servers from our curated list:\n  /mcp browse        # See popular servers\n  /mcp install <id>  # Install directly`);
+        } else {
+          addMessage('system', `🔌 MCP Commands:
+  /mcp              List connected servers
+  /mcp connect      Connect to all configured servers
+  /mcp disconnect   Disconnect from all servers
+  /mcp tools        List available MCP tools
+  /mcp browse       Browse popular MCP servers
+  /mcp search <q>   Search MCP servers
+  /mcp install <id> Install an MCP server
+  /mcp marketplace  View online marketplaces
+
+Config file: ~/.zesbe/mcp.json`);
+        }
+        break;
+
+      case '/attach':
+        if (!args) {
+          addMessage('system', 'Usage: /attach <file-path>\n\nExample: /attach src/index.ts\n\nUse /files to see attached files');
+        } else {
+          const file = contextManager.current.attachFile(args);
+          if (file) {
+            setAttachedFiles(contextManager.current.getAttachedFiles().map(f => f.path));
+            addMessage('success', `📎 Attached: ${file.name} (${file.tokens} tokens, ${file.language})`);
+          } else {
+            addMessage('error', `Failed to attach: ${args}`);
+          }
+        }
+        break;
+
+      case '/detach':
+        if (!args) {
+          addMessage('system', 'Usage: /detach <file-path|all>\n\nExample: /detach src/index.ts\n        /detach all');
+        } else if (args === 'all') {
+          contextManager.current.detachAll();
+          setAttachedFiles([]);
+          addMessage('success', '📎 All files detached');
+        } else {
+          if (contextManager.current.detachFile(args)) {
+            setAttachedFiles(contextManager.current.getAttachedFiles().map(f => f.path));
+            addMessage('success', `📎 Detached: ${args}`);
+          } else {
+            addMessage('error', `File not attached: ${args}`);
+          }
+        }
+        break;
+
+      case '/files':
+        const files = contextManager.current.getAttachedFiles();
+        if (files.length === 0) {
+          addMessage('system', '📁 No files attached\n\nUse /attach <file> to add files to context');
+        } else {
+          const info = contextManager.current.getContextInfo();
+          addMessage('system', formatContextInfo(info));
+        }
+        break;
+
+      case '/preview':
+        if (!args) {
+          addMessage('system', 'Usage: /preview <file-path>\n\nExample: /preview src/index.ts');
+        } else {
+          const preview = createFilePreview(args, { maxLines: 30 });
+          addMessage('system', preview);
+        }
+        break;
+
+      case '/export':
+        const exportFormat = (args.split(' ')[0] || 'markdown') as ExportFormat;
+        const chatMessages: ChatMessage[] = messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: new Date(m.timestamp || Date.now()),
+            tokens: m.tokens
+          }));
+
+        if (chatMessages.length === 0) {
+          addMessage('system', 'No conversation to export');
+        } else {
+          const conv = saveConversation(chatMessages, agent.provider, agent.model);
+          const exported = exportConversation(conv, exportFormat);
+          const exportPath = path.join(process.cwd(), `chat-${Date.now()}.${exportFormat === 'markdown' ? 'md' : exportFormat}`);
+          fs.writeFileSync(exportPath, exported);
+          addMessage('success', `📤 Exported to: ${exportPath}\nFormat: ${exportFormat}`);
+        }
+        break;
+
+      case '/history':
+        if (args) {
+          const searchResults = searchConversations(args);
+          addMessage('system', formatSearchResults(searchResults, args));
+        } else {
+          const convList = listConversations(10);
+          addMessage('system', formatConversationList(convList));
+        }
+        break;
+
+      case '/copy':
+        if (!lastResponse.current) {
+          addMessage('system', 'No response to copy');
+        } else {
+          const success = await copyToClipboard(lastResponse.current);
+          if (success) {
+            addMessage('success', '📋 Last response copied to clipboard');
+          } else {
+            addMessage('error', 'Failed to copy to clipboard');
+          }
+        }
+        break;
+
+      case '/paste':
+        const clipboardText = await readFromClipboard();
+        if (clipboardText) {
+          setQuery(prev => prev + clipboardText);
+          addMessage('system', `📋 Pasted ${clipboardText.length} characters`);
+        } else {
+          addMessage('system', 'Clipboard is empty');
+        }
+        break;
+
+      case '/shortcuts':
+        const categories = getShortcutsByCategory();
+        let shortcutsHelp = '⌨️ KEYBOARD SHORTCUTS:\n\n';
+        for (const [category, shortcuts] of Object.entries(categories)) {
+          if (shortcuts.length > 0) {
+            shortcutsHelp += `${category}:\n`;
+            for (const shortcut of shortcuts) {
+              shortcutsHelp += `  ${formatShortcut(shortcut).padEnd(15)} ${shortcut.description}\n`;
+            }
+            shortcutsHelp += '\n';
+          }
+        }
+        shortcutsHelp += `CLI Specific:\n`;
+        shortcutsHelp += `  Up/Down        Navigate input history\n`;
+        shortcutsHelp += `  Tab            Auto-complete\n`;
+        shortcutsHelp += `  Shift+Tab      Previous completion\n`;
+        shortcutsHelp += `  Ctrl+Y         Copy last response\n`;
+        shortcutsHelp += `  ESC            Interrupt/Close menus\n`;
+        addMessage('system', shortcutsHelp);
+        break;
+
+      case '/diff':
+        const diffArgs = args.split(' ');
+        if (diffArgs.length < 2) {
+          addMessage('system', 'Usage: /diff <file1> <file2>\n\nExample: /diff old.ts new.ts');
+        } else {
+          try {
+            const oldContent = fs.readFileSync(diffArgs[0], 'utf-8');
+            const newContent = fs.readFileSync(diffArgs[1], 'utf-8');
+            const diff = createFileDiff(diffArgs[0], diffArgs[1], oldContent, newContent);
+            addMessage('system', diff);
+          } catch (e) {
+            const error = e as Error;
+            addMessage('error', `Diff failed: ${error.message}`);
+          }
+        }
+        break;
+
+      case '/exit':
+        // Auto-save on exit
+        agent.saveSession('last');
+        console.log('\n👋 Goodbye! Session auto-saved.\n');
+        exit();
+        break;
+
+      default:
+        addMessage('error', `Unknown: ${command}. Type /help`);
+    }
+  };
+
+  const handleProviderSelect = (id: string): void => {
+    setShowProviderMenu(false);
+    const p = PROVIDERS[id];
+    if (p) {
+      agent.provider = id;
+      agent.baseUrl = p.baseUrl;
+
+      // Load API key for new provider
+      const keyFile = path.join(os.homedir(), p.apiKeyFile || `.${id}_api_key`);
+      if (fs.existsSync(keyFile)) {
+        try {
+          agent.apiKey = fs.readFileSync(keyFile, 'utf-8').trim();
+        } catch (_e) {
+          // Ignore read errors
+        }
+      }
+
+      const firstModel = p.models?.[0];
+      agent.model = typeof firstModel === 'object' ? firstModel.id : firstModel;
+      addMessage('success', `Provider: ${p.name}, Model: ${agent.model}`);
+    }
+  };
+
+  const handleModelSelect = (id: string): void => {
+    setShowModelMenu(false);
+    agent.model = id;
+    addMessage('success', `Model: ${id}`);
+  };
+
+  // Render
+  return h(Box, { flexDirection: 'column', padding: 1 },
+    // Header
+    h(Box, { marginBottom: 1 },
+      h(Text, { color: 'cyan', bold: true }, '╭─────────────────────────────────────────────────────────────╮'),
+    ),
+    h(Box, { marginBottom: 1, paddingX: 1 },
+      h(Text, { color: 'cyan', bold: true }, '│ '),
+      h(Text, { color: 'white', bold: true }, '🚀 My AI CLI'),
+      h(Text, { color: 'gray' }, ` • ${PROVIDERS[agent.provider]?.name || agent.provider}`),
+      h(Text, { color: 'magenta' }, ` • ${agent.model}`),
+      agent.yolo && h(Text, { color: 'yellow' }, ' ⚡'),
+      h(Text, { color: 'cyan', bold: true }, '                    │'),
+    ),
+    h(Box, { marginBottom: 1 },
+      h(Text, { color: 'cyan', bold: true }, '╰─────────────────────────────────────────────────────────────╯'),
+    ),
+
+    // Messages
+    h(Box, { flexDirection: 'column', marginBottom: 1 },
+      ...messages.slice(-15).map((msg, i) =>
+        h(Message, { key: `${i}-${msg.role}`, ...msg })
+      ),
+
+      // Active tool calls (Claude-style indicators)
+      activeToolCalls.length > 0 && h(ToolCallsList, { toolCalls: activeToolCalls }),
+
+      // Assessing indicator (before AI responds)
+      isLoading && !activeToolCalls.some(tc => tc.status === 'running') && h(AssessingIndicator, { agentName: 'Zesbe' }),
+
+      // Typing indicator (while AI is responding)
+      isTyping && currentResponse && h(Box, { flexDirection: 'column', marginY: 1 },
+        h(Box, { gap: 2 },
+          h(Text, { color: 'green', bold: true }, '┌─ Assistant'),
+          h(TypingIndicator, { type: 'dots' })
+        ),
+        h(Box, { marginLeft: 2 },
+          h(Text, { color: 'white' }, currentResponse),
+          h(Text, { color: 'cyan' }, '▊')
+        )
+      )
+    ),
+
+    // Menus
+    showSlashMenu && h(SlashMenu, {
+      query,
+      onSelect: (cmd: string) => { setShowSlashMenu(false); setQuery(''); executeCommand(cmd); },
+      onCancel: () => setShowSlashMenu(false)
+    }),
+    showProviderMenu && h(ProviderMenu, {
+      onSelect: handleProviderSelect,
+      onCancel: () => setShowProviderMenu(false),
+      current: agent.provider
+    }),
+    showModelMenu && h(ModelMenu, {
+      provider: agent.provider,
+      onSelect: handleModelSelect,
+      onCancel: () => setShowModelMenu(false),
+      current: agent.model
+    }),
+
+    // Input
+    h(Box, { flexDirection: 'column' },
+      h(Text, { color: 'gray' }, '─'.repeat(60)),
+      h(Box, null,
+        h(Text, { color: 'cyan', bold: true }, '❯ '),
+        h(TextInput, {
+          value: query,
+          onChange: setQuery,
+          onSubmit: handleSubmit,
+          placeholder: 'Type message or / for commands...'
+        })
+      ),
+      // Status line with streaming indicator
+      h(Box, { marginTop: 1, gap: 2 },
+        // Streaming status (animated when active)
+        h(StreamingStatus, { isLoading, isTyping, tokenCount: _tokenCount }),
+        // Static info (when not streaming)
+        !isLoading && !isTyping && totalTokens > 0 && h(Text, { color: 'gray', dimColor: true }, `🎯 ${totalTokens} tokens`),
+        !isLoading && !isTyping && responseTime && h(Text, { color: 'gray', dimColor: true }, `⏱️ ${responseTime}`),
+        !isLoading && !isTyping && loadedSkillsCount > 0 && h(Text, { color: 'gray', dimColor: true }, `📚 ${loadedSkillsCount} skills`)
+      )
+    )
+  );
+};
+
+// Export
 export async function startInkMode(agent: AgentType, initialPrompt?: string): Promise<void> {
-  const cli = new ChatCLI(agent);
-  await cli.start(initialPrompt);
+  if (!process.stdin.isTTY) {
+    console.log('\n⚠️  Ink mode requires interactive terminal.\n');
+    const { startInteractiveMode } = await import('./cli.js');
+    return startInteractiveMode(agent, initialPrompt);
+  }
+
+  render(h(ChatApp, { agent, initialPrompt }));
 }
