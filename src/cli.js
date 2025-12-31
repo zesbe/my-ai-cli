@@ -75,8 +75,9 @@ export async function startInteractiveMode(agent, initialPrompt) {
 
   // Show input prompt like Claude CLI - fixed at bottom
   const showPrompt = () => {
-    console.log(chalk.gray('─'.repeat(75)));
-    process.stdout.write(chalk.green('> '));
+    console.log('');
+    console.log(chalk.gray('╭─') + chalk.cyan(' User ') + chalk.gray('──────────────────────────────────────────────────────────────────'));
+    process.stdout.write(chalk.cyan('│ ') + chalk.bold('> '));
   };
 
   const prompt = () => {
@@ -93,26 +94,26 @@ export async function startInteractiveMode(agent, initialPrompt) {
 
       if (input === '/help' || input === '/h') {
         showHelp();
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
       if (input === '/clear' || input === '/c') {
         agent.clearHistory();
         console.log(chalk.gray('  ✓ Conversation cleared.\n'));
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
       if (input === '/tools') {
         showTools();
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
       if (input === '/model') {
         console.log(chalk.cyan(`  Current model: ${agent.model}\n`));
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
@@ -120,7 +121,7 @@ export async function startInteractiveMode(agent, initialPrompt) {
         const newModel = input.replace('/model ', '').trim();
         agent.model = newModel;
         console.log(chalk.green(`  ✓ Model changed to: ${newModel}\n`));
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
@@ -131,12 +132,12 @@ export async function startInteractiveMode(agent, initialPrompt) {
         } else {
           console.log(chalk.gray('  ⏵⏵ bypass permissions OFF\n'));
         }
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
       if (!input) {
-        prompt();
+        setImmediate(() => prompt());
         return;
       }
 
@@ -153,56 +154,66 @@ export async function startInteractiveMode(agent, initialPrompt) {
       try {
         await agent.chat(input, {
           onStart: () => {
-            spinner.stop();
-            console.log('');
+            if (spinner.isSpinning) spinner.stop();
+            console.log(chalk.gray('╭─') + chalk.magenta(' Assistant ') + chalk.gray('─────────────────────────────────────────────────────────────'));
+            process.stdout.write(chalk.magenta('│ '));
           },
           onToken: (token) => {
             // Filter thinking tags
             const filtered = filter.process(token);
             if (filtered) {
-              process.stdout.write(filtered);
+              const withBar = filtered.replace(/\n/g, '\n' + chalk.magenta('│ '));
+              process.stdout.write(withBar);
             }
           },
           onToolCall: async (tool, args) => {
-            console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
-            console.log(chalk.gray('  ' + JSON.stringify(args, null, 2).replace(/\n/g, '\n  ')));
+            if (spinner.isSpinning) spinner.stop();
+            console.log('\n' + chalk.magenta('│ ') + chalk.yellow(`🔧 Tool: ${tool}`));
+            const argsStr = JSON.stringify(args, null, 2).replace(/\n/g, '\n' + chalk.magenta('│ ') + '  ');
+            console.log(chalk.magenta('│ ') + chalk.gray('  ' + argsStr));
 
             if (!agent.yolo) {
-              const approved = await askApproval(rl);
+              process.stdout.write(chalk.magenta('│ ') + chalk.yellow('Approve? [y/N]: '));
+              const approved = await new Promise(resolve => {
+                rl.question('', (answer) => {
+                  resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+                });
+              });
               return approved;
             }
-            console.log(chalk.green('  ✓ Auto-approved (YOLO mode)'));
+            console.log(chalk.magenta('│ ') + chalk.green('✓ Auto-approved (YOLO mode)'));
             return true;
           },
           onToolResult: (tool, result) => {
-            console.log(chalk.green(`  ✓ ${tool} completed`));
+            console.log(chalk.magenta('│ ') + chalk.green(`✓ ${tool} completed`));
             if (result && result.length < 300) {
-              console.log(chalk.gray('  ' + result.substring(0, 300)));
+              const resStr = String(result).substring(0, 300).replace(/\n/g, '\n' + chalk.magenta('│ ') + '  ');
+              console.log(chalk.magenta('│ ') + chalk.gray('  ' + resStr));
             }
           },
           onEnd: () => {
-            console.log('\n');
+            console.log('\n' + chalk.gray('╰─────────────────────────────────────────────────────────────────────────'));
           },
           onError: (err) => {
-            spinner.stop();
-            console.log(chalk.red(`\n✗ Error: ${err.message}\n`));
+            if (spinner.isSpinning) spinner.stop();
+            console.log('\n' + chalk.magenta('│ ') + chalk.red(`✗ Error: ${err.message}\n`));
           }
         });
       } catch (err) {
-        spinner.stop();
+        if (spinner.isSpinning) spinner.stop();
         console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
+      } finally {
+        // Continue the prompt loop
+        setImmediate(() => prompt());
       }
-
-      // Continue the prompt loop
-      setImmediate(() => prompt());
     });
   };
 
   // Handle initial prompt
   if (initialPrompt) {
-    console.log(chalk.gray('─'.repeat(75)));
-    console.log(chalk.green('> ') + initialPrompt);
     console.log('');
+    console.log(chalk.gray('╭─') + chalk.cyan(' User ') + chalk.gray('──────────────────────────────────────────────────────────────────'));
+    console.log(chalk.cyan('│ ') + chalk.bold('> ') + initialPrompt);
 
     const spinner = ora({
       text: chalk.gray('Thinking...'),
@@ -215,31 +226,43 @@ export async function startInteractiveMode(agent, initialPrompt) {
     try {
       await agent.chat(initialPrompt, {
         onStart: () => {
-          spinner.stop();
-          console.log('');
+          if (spinner.isSpinning) spinner.stop();
+          console.log(chalk.gray('╭─') + chalk.magenta(' Assistant ') + chalk.gray('─────────────────────────────────────────────────────────────'));
+          process.stdout.write(chalk.magenta('│ '));
         },
         onToken: (token) => {
           const filtered = filter.process(token);
           if (filtered) {
-            process.stdout.write(filtered);
+            const withBar = filtered.replace(/\n/g, '\n' + chalk.magenta('│ '));
+            process.stdout.write(withBar);
           }
         },
         onToolCall: async (tool, args) => {
-          console.log(chalk.yellow(`\n\n  🔧 Tool: ${tool}`));
+          if (spinner.isSpinning) spinner.stop();
+          console.log('\n' + chalk.magenta('│ ') + chalk.yellow(`🔧 Tool: ${tool}`));
+          const argsStr = JSON.stringify(args, null, 2).replace(/\n/g, '\n' + chalk.magenta('│ ') + '  ');
+          console.log(chalk.magenta('│ ') + chalk.gray('  ' + argsStr));
+
           if (!agent.yolo) {
-            const approved = await askApproval(rl);
+            process.stdout.write(chalk.magenta('│ ') + chalk.yellow('Approve? [y/N]: '));
+            const approved = await new Promise(resolve => {
+              rl.question('', (answer) => {
+                resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+              });
+            });
             return approved;
           }
-          console.log(chalk.green('  ✓ Auto-approved'));
+          console.log(chalk.magenta('│ ') + chalk.green('✓ Auto-approved'));
           return true;
         },
         onEnd: () => {
-          console.log('\n');
+          console.log('\n' + chalk.gray('╰─────────────────────────────────────────────────────────────────────────'));
         }
       });
     } catch (err) {
-      spinner.stop();
-      console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
+      if (spinner.isSpinning) spinner.stop();
+      console.log('\n' + chalk.magenta('│ ') + chalk.red(`✗ Error: ${err.message}`));
+      console.log(chalk.gray('╰─────────────────────────────────────────────────────────────────────────'));
     }
 
   }
