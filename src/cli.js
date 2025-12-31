@@ -59,6 +59,20 @@ export async function startInteractiveMode(agent, initialPrompt) {
     terminal: true
   });
 
+  // Prevent readline from closing on Ctrl+C, handle it gracefully
+  rl.on('close', () => {
+    showGoodbye();
+    process.exit(0);
+  });
+
+  // Handle SIGINT (Ctrl+C)
+  process.on('SIGINT', () => {
+    console.log('');
+    showGoodbye();
+    rl.close();
+    process.exit(0);
+  });
+
   // Show input prompt like Claude CLI - fixed at bottom
   const showPrompt = () => {
     console.log(chalk.gray('─'.repeat(75)));
@@ -179,7 +193,8 @@ export async function startInteractiveMode(agent, initialPrompt) {
         console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
       }
 
-      prompt();
+      // Continue the prompt loop
+      setImmediate(() => prompt());
     });
   };
 
@@ -227,14 +242,9 @@ export async function startInteractiveMode(agent, initialPrompt) {
       console.log(chalk.red(`\n  ✗ Error: ${err.message}`));
     }
 
-    // Exit after one-shot prompt (non-interactive)
-    if (!process.stdin.isTTY) {
-      rl.close();
-      process.exit(0);
-    }
   }
 
-  // Start interactive loop
+  // Start interactive loop - always continue
   prompt();
 }
 
