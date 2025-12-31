@@ -29,8 +29,7 @@ program
   .option('-y, --yolo', 'Auto-approve all actions (bypass permissions)', config.yolo)
   .option('-q, --quiet', 'Skip welcome screen')
   .option('--no-stream', 'Disable streaming output')
-  .option('--classic', 'Use classic readline mode (auto on Termux)')
-  .option('--ink', 'Force Ink TUI mode (better on desktop)')
+  .option('--classic', 'Use classic readline mode instead of Ink')
   .option('--setup', 'Run setup wizard')
   .argument('[prompt...]', 'Initial prompt')
   .action(async (promptArgs, options) => {
@@ -103,17 +102,11 @@ program
     // Start CLI
     const initialPrompt = promptArgs.join(' ');
     
-    // Auto-detect Termux/Android - use classic mode for better input handling
-    const isTermux = process.env.TERMUX_VERSION || process.env.PREFIX?.includes('com.termux');
-    
-    // --ink forces Ink mode, --classic forces classic, otherwise auto-detect
-    let useClassic = options.classic || (isTermux && !options.ink);
-    
-    if (useClassic) {
-      // Classic readline mode (better for Termux/mobile)
+    if (options.classic) {
+      // Classic readline mode
       await startInteractiveMode(agent, initialPrompt);
     } else {
-      // Ink mode (better for desktop terminals)
+      // Ink mode (default)
       await startInkMode(agent, initialPrompt);
     }
   });
