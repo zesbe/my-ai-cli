@@ -4,8 +4,10 @@ import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import SelectInput from 'ink-select-input';
 import { PROVIDERS, getProviderList, getModelsForProvider, getAllModels, searchModels } from './models-db.js';
+import { PROVIDER_INFO, formatProviderGuide, getAllProvidersQuickRef, getFreeProviders } from './provider-info.js';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 const { createElement: h } = React;
 
@@ -15,9 +17,13 @@ const { createElement: h } = React;
 
 const SLASH_COMMANDS = [
   { value: '/help', label: '/help', description: 'Show all available commands and usage guide' },
+  { value: '/setup', label: '/setup', description: '🔑 Setup API key for a provider - User friendly guide' },
+  { value: '/providers', label: '/providers', description: '📋 List all providers with pricing & free tiers' },
   { value: '/model', label: '/model', description: 'Switch AI model - Interactive selection menu' },
   { value: '/provider', label: '/provider', description: 'Switch AI provider (OpenAI, Claude, Gemini, etc.)' },
   { value: '/models', label: '/models', description: 'List all available models for current provider' },
+  { value: '/apikey', label: '/apikey', description: '🔐 Set/update API key for current provider' },
+  { value: '/free', label: '/free', description: '🆓 Show providers with FREE tier (Gemini, Groq, etc.)' },
   { value: '/clear', label: '/clear', description: 'Clear conversation history and free up context' },
   { value: '/compact', label: '/compact', description: 'Summarize and compact conversation history' },
   { value: '/yolo', label: '/yolo', description: 'Toggle auto-approve mode (bypass tool permissions)' },
@@ -325,39 +331,50 @@ const ChatApp = ({ agent, initialPrompt }) => {
       case '/help':
       case '/h':
         const helpText = `
-📚 MY AI CLI - COMMAND REFERENCE
+📚 MY AI CLI - ENTERPRISE COMMAND REFERENCE
 
-NAVIGATION:
-  /model              Interactive model selection
-  /provider           Switch AI provider  
-  /models             List models for current provider
+🔑 SETUP & API KEYS:
+  /setup              Setup wizard - Get API key untuk provider
+  /providers          List semua provider + pricing + free tier
+  /free               Tampilkan provider GRATIS (Gemini, Groq, dll)
+  /apikey             Set/update API key untuk provider aktif
 
-CONVERSATION:
-  /clear              Clear all history
-  /compact            Summarize & compact history
-  /history            View recent messages
-  /export             Export to file
+🤖 MODEL & PROVIDER:
+  /model              Interactive model selection dengan preview
+  /provider           Switch AI provider (12 providers tersedia!)
+  /models             List semua model untuk provider aktif
 
-SETTINGS:
+💬 CONVERSATION:
+  /clear              Hapus semua history
+  /compact            Compress history dengan summary
+  /history            Lihat pesan terakhir
+  /export             Export ke file JSON
+
+⚙️ SETTINGS:
   /yolo               Toggle auto-approve (current: ${agent.yolo ? 'ON' : 'OFF'})
-  /config             View configuration
+  /config             Lihat konfigurasi lengkap
+  /context            Stats: token count, messages, dll
   /debug              Toggle debug mode
-  /theme              Change color theme
 
-TOOLS:
-  /tools              List available tools
+🔧 TOOLS:
+  /tools              List semua tools dengan kategori
 
-SESSION:
-  /save               Save session
-  /load               Load session
-  /reset              Reset to initial state
-  /exit               Exit CLI
+💾 SESSION:
+  /save               Simpan session ke file
+  /load <file>        Load session dari file
+  /reset              Reset ke state awal
+  /exit               Keluar dari CLI
 
-TIPS:
-  • Type / to see command suggestions
-  • Arrow keys to navigate, Enter to select
-  • Press ESC to cancel menus
-  • Ctrl+C to exit anytime`;
+💡 TIPS:
+  • Ketik / untuk lihat suggestions
+  • Arrow keys untuk navigasi, Enter untuk pilih
+  • ESC untuk cancel menu
+  • Ctrl+C untuk exit kapan saja
+  
+🌟 MULAI DARI MANA?
+  1. /free     → Lihat provider gratis
+  2. /setup    → Setup API key
+  3. /model    → Pilih model`;
         addMessage('info', helpText);
         break;
 
@@ -510,6 +527,94 @@ TIPS:
           addMessage('success', `Session loaded from ${args}`);
         } catch (e) {
           addMessage('error', `Load failed: ${e.message}`);
+        }
+        break;
+
+      case '/setup':
+        // Show setup guide for a provider
+        if (args) {
+          const guide = formatProviderGuide(args);
+          if (guide) {
+            addMessage('info', guide);
+          } else {
+            addMessage('error', `Provider "${args}" not found. Use /providers to see all.`);
+          }
+        } else {
+          // Show provider selection for setup
+          setShowProviderMenu(true);
+          addMessage('system', '👆 Pilih provider di atas, lalu ketik /setup <provider> untuk panduan lengkap');
+        }
+        break;
+
+      case '/providers':
+        addMessage('info', getAllProvidersQuickRef());
+        break;
+
+      case '/free':
+        const freeProviders = getFreeProviders();
+        let freeText = `
+🆓 PROVIDER GRATIS / FREE TIER:
+
+${freeProviders.map(p => `
+▸ ${p.name.toUpperCase()}
+  ${p.description}
+  Pricing: ${p.pricing}
+  Sign up: ${p.signupUrl}
+`).join('')}
+
+💡 Cara setup:
+   1. Pilih provider di atas
+   2. Ketik /setup <provider> untuk panduan
+   3. Contoh: /setup gemini
+`;
+        addMessage('info', freeText);
+        break;
+
+      case '/apikey':
+        const providerInfo = PROVIDER_INFO[agent.provider];
+        if (!providerInfo) {
+          addMessage('error', `No info for provider: ${agent.provider}`);
+          break;
+        }
+        
+        if (!providerInfo.envVar) {
+          addMessage('info', `Provider ${providerInfo.name} tidak memerlukan API key (local)`);
+          break;
+        }
+
+        const homeDir = os.homedir();
+        const keyFile = path.join(homeDir, `.${agent.provider}_api_key`);
+        
+        if (args) {
+          // Save API key
+          try {
+            fs.writeFileSync(keyFile, args.trim());
+            fs.chmodSync(keyFile, 0o600);
+            agent.apiKey = args.trim();
+            addMessage('success', `API key saved to ${keyFile}`);
+            addMessage('info', `Atau set environment variable:\nexport ${providerInfo.envVar}="${args.trim()}"`);
+          } catch (e) {
+            addMessage('error', `Failed to save: ${e.message}`);
+          }
+        } else {
+          // Show how to set API key
+          addMessage('info', `
+🔐 SET API KEY untuk ${providerInfo.name}:
+
+1️⃣ Via command:
+   /apikey YOUR_API_KEY_HERE
+
+2️⃣ Via environment variable:
+   export ${providerInfo.envVar}=your_key
+
+3️⃣ Via file:
+   echo "your_key" > ~/${providerInfo.apiKeyFile}
+
+📍 Get API key: ${providerInfo.apiKeyUrl}
+
+💡 Current key file: ${keyFile}
+   ${fs.existsSync(keyFile) ? '✓ File exists' : '✗ File not found'}
+`);
         }
         break;
 
